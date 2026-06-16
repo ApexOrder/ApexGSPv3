@@ -6,6 +6,13 @@ import { cn } from '@/lib/utils'
 
 interface CreatedNode { id: string; name: string; registration_token: string }
 
+function generateToken(prefix: string) {
+  const bytes = new Uint8Array(24)
+  crypto.getRandomValues(bytes)
+  const value = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+  return `${prefix}_${value}`
+}
+
 export default function AddNode() {
   const navigate = useNavigate()
   const [name, setName] = useState('')
@@ -14,20 +21,43 @@ export default function AddNode() {
   const [createdNode, setCreatedNode] = useState<CreatedNode | null>(null)
   const [copied, setCopied] = useState(false)
 
-  const panelUrl = window.location.origin
+  const panelUrl = (import.meta.env.VITE_APP_URL as string | undefined)?.replace(/\/$/, '') || window.location.origin
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
     if (!name.trim()) return
+
     setSubmitting(true)
     setError(null)
+
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
+
+    if (userError || !user) {
+      setSubmitting(false)
+      setError(userError?.message ?? 'You must be signed in to create a node')
+      return
+    }
+
     const { data, error: insertError } = await supabase
       .from('nodes')
-      .insert({ name: name.trim() })
+      .insert({
+        user_id: user.id,
+        name: name.trim(),
+        status: 'pending',
+        registration_token: generateToken('agsp_reg'),
+        node_secret: generateToken('agsp_node'),
+        token_used: false,
+      })
       .select('id, name, registration_token')
       .single()
+
     setSubmitting(false)
-    if (insertError || !data) { setError(insertError?.message ?? 'Failed to create node'); return }
+
+    if (insertError || !data) {
+      setError(insertError?.message ?? 'Failed to create node')
+      return
+    }
+
     setCreatedNode(data)
   }
 
@@ -38,7 +68,9 @@ export default function AddNode() {
   }
 
   const installCmd = createdNode
-    ? `curl -fsSL ${panelUrl}/install/linux.sh | sudo bash -s -- \\\n  --panel-url ${panelUrl} \\\n  --token ${createdNode.registration_token}`
+    ? `curl -fsSL ${panelUrl}/install/linux.sh | sudo bash -s -- \
+  --panel-url ${panelUrl} \
+  --token ${createdNode.registration_token}`
     : ''
 
   if (createdNode) {
@@ -71,7 +103,8 @@ export default function AddNode() {
               <span className="text-sm font-semibold text-slate-200">Install Command</span>
             </div>
             <button
-              onClick={() => copyToClipboard(installCmd.replace(/\\\n\s+/g, ' '))}
+              onClick={() => copyToClipboard(installCmd.replace(/\
+\s+/g, ' '))}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
             >
               {copied ? <><Check className="w-3 h-3 text-emerald-400" />Copied!</> : <><Copy className="w-3 h-3" />Copy</>}
@@ -145,7 +178,7 @@ export default function AddNode() {
               type="text"
               value={name}
               onChange={e => setName(e.target.value)}
-              placeholder="e.g. US-East-01, Frankfurt-VPS"
+              placeholder="e.g. UK-Node-01, Germany-VPS"
               required
               maxLength={64}
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500/50 transition-all"
