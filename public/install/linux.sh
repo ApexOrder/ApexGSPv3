@@ -2,6 +2,7 @@
 set -euo pipefail
 
 PANEL_URL=""
+API_URL=""
 REGISTRATION_TOKEN=""
 INSTALL_DIR="/opt/apexgsp-daemon"
 SERVICE_NAME="apexgspd"
@@ -10,6 +11,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --panel-url)
       PANEL_URL="${2:-}"
+      shift 2
+      ;;
+    --api-url)
+      API_URL="${2:-}"
       shift 2
       ;;
     --token)
@@ -43,10 +48,16 @@ if [[ "$EUID" -ne 0 ]]; then
 fi
 
 PANEL_URL="${PANEL_URL%/}"
+API_URL="${API_URL%/}"
+
+if [[ -z "$API_URL" ]]; then
+  API_URL="$PANEL_URL/node-api"
+fi
 
 cat <<BANNER
 ApexGSP daemon installer
 Panel: $PANEL_URL
+API: $API_URL
 Install dir: $INSTALL_DIR
 BANNER
 
@@ -54,6 +65,7 @@ mkdir -p "$INSTALL_DIR"
 
 cat > "$INSTALL_DIR/.env" <<ENV
 APEXGSP_PANEL_URL=$PANEL_URL
+APEXGSP_API_URL=$API_URL
 APEXGSP_REGISTRATION_TOKEN=$REGISTRATION_TOKEN
 APEXGSP_NODE_ID=
 APEXGSP_NODE_SECRET=
@@ -82,21 +94,63 @@ log() {
   echo "[$(date -Is)] $*"
 }
 
+json_get() {
+  python3 -c "import json,sys; print(json.load(sys.stdin).get('$1',''))"
+}
+
+save_env_value() {
+  local key="$1"
+  local value="$2"
+  if grep -q "^${key}=" "$ENV_FILE"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+  else
+    echo "${key}=${value}" >> "$ENV_FILE"
+  fi
+}
+
 register_node() {
   if [[ -n "${APEXGSP_NODE_ID:-}" && -n "${APEXGSP_NODE_SECRET:-}" ]]; then
     log "Node already registered: $APEXGSP_NODE_ID"
     return
   fi
 
-  log "Registration endpoint is not implemented yet in the hosted panel."
-  log "Token saved locally. The next backend step is to add /api/node/register."
-  log "Panel: ${APEXGSP_PANEL_URL}"
-  log "Hostname: ${HOSTNAME_VALUE}"
+  log "Registering node with ApexGSP..."
+
+  response="$(curl -fsS -X POST "${APEXGSP_API_URL}/register" \
+    -H "Content-Type: application/json" \
+    -d "{\"token\":\"${APEXGSP_REGISTRATION_TOKEN}\",\"hostname\":\"${HOSTNAME_VALUE}\",\"daemon_version\":\"${DAEMON_VERSION}\"}")"
+
+  node_id="$(printf '%s' "$response" | json_get node_id)"
+  node_secret="$(printf '%s' "$response" | json_get node_secret)"
+
+  if [[ -z "$node_id" || -z "$node_secret" ]]; then
+    log "Registration response did not include node credentials."
+    log "$response"
+    exit 1
+  fi
+
+  save_env_value "APEXGSP_NODE_ID" "$node_id"
+  save_env_value "APEXGSP_NODE_SECRET" "$node_secret"
+
+  APEXGSP_NODE_ID="$node_id"
+  APEXGSP_NODE_SECRET="$node_secret"
+
+  log "Node registered: $APEXGSP_NODE_ID"
+}
+
+send_heartbeat() {
+  curl -fsS -X POST "${APEXGSP_API_URL}/heartbeat" \
+    -H "Content-Type: application/json" \
+    -d "{\"node_id\":\"${APEXGSP_NODE_ID}\",\"node_secret\":\"${APEXGSP_NODE_SECRET}\",\"daemon_version\":\"${DAEMON_VERSION}\",\"metadata\":{\"hostname\":\"${HOSTNAME_VALUE}\"}}" >/dev/null
 }
 
 heartbeat_loop() {
   while true; do
-    log "Daemon running. Waiting for node registration API implementation."
+    if send_heartbeat; then
+      log "Heartbeat sent."
+    else
+      log "Heartbeat failed."
+    fi
     sleep 30
   done
 }
@@ -136,6 +190,4 @@ Useful commands:
   systemctl status $SERVICE_NAME --no-pager
   journalctl -u $SERVICE_NAME -f
   cat $INSTALL_DIR/.env
-
-Note: the installer is now working, but daemon registration still needs the hosted /api/node/register endpoint.
 DONE
