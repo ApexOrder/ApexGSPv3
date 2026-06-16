@@ -1,0 +1,120 @@
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "npm:@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
+};
+
+function json(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+function err(message: string, status = 400) {
+  return json({ error: message }, status);
+}
+
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 200, headers: corsHeaders });
+  }
+
+  const url = new URL(req.url);
+  const path = url.pathname.replace(/^\/node-api/, "");
+
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    { auth: { persistSession: false } },
+  );
+
+  try {
+    // POST /node-api/register
+    if (req.method === "POST" && path === "/register") {
+      const body = await req.json();
+      const { token, hostname, ip_address, daemon_version } = body;
+
+      if (!token) return err("Missing token");
+
+      const { data: node, error: findErr } = await supabase
+        .from("nodes")
+        .select("id, token_used, node_secret")
+        .eq("registration_token", token)
+        .maybeSingle();
+
+      if (findErr || !node) return err("Invalid registration token", 401);
+      if (node.token_used) return err("Registration token already used", 409);
+
+      const { error: updateErr } = await supabase
+        .from("nodes")
+        .update({
+          token_used: true,
+          status: "online",
+          hostname: hostname ?? null,
+          ip_address: ip_address ?? null,
+          daemon_version: daemon_version ?? null,
+          last_heartbeat: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", node.id);
+
+      if (updateErr) return err("Failed to register node", 500);
+
+      await supabase.from("heartbeats").insert({
+        node_id: node.id,
+        status: "online",
+        metadata: { event: "registered", daemon_version },
+      });
+
+      return json({ success: true, node_id: node.id, node_secret: node.node_secret });
+    }
+
+    // POST /node-api/heartbeat
+    if (req.method === "POST" && path === "/heartbeat") {
+      const body = await req.json();
+      const { node_id, node_secret, daemon_version, metadata } = body;
+
+      if (!node_id || !node_secret) return err("Missing node_id or node_secret");
+
+      const { data: node, error: findErr } = await supabase
+        .from("nodes")
+        .select("id")
+        .eq("id", node_id)
+        .eq("node_secret", node_secret)
+        .maybeSingle();
+
+      if (findErr || !node) return err("Invalid credentials", 401);
+
+      const now = new Date().toISOString();
+
+      await supabase
+        .from("nodes")
+        .update({ status: "online", last_heartbeat: now, daemon_version: daemon_version ?? undefined, updated_at: now })
+        .eq("id", node.id);
+
+      await supabase.from("heartbeats").insert({
+        node_id: node.id,
+        status: "online",
+        metadata: metadata ?? null,
+      });
+
+      await supabase.rpc("mark_stale_nodes_offline");
+
+      return json({ success: true, timestamp: now });
+    }
+
+    // GET /node-api/health
+    if (req.method === "GET" && path === "/health") {
+      return json({ status: "ok", timestamp: new Date().toISOString() });
+    }
+
+    return err("Not found", 404);
+  } catch (e) {
+    console.error(e);
+    return err("Internal server error", 500);
+  }
+});
