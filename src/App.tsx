@@ -3,6 +3,7 @@ import { AuthProvider } from '@/contexts/AuthContext'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import Layout from '@/components/Layout'
 import Login from '@/pages/Login'
+import AuthCallback from '@/pages/AuthCallback'
 import Dashboard from '@/pages/Dashboard'
 import Nodes from '@/pages/Nodes'
 import AddNode from '@/pages/AddNode'
@@ -15,6 +16,7 @@ export default function App() {
       <AuthProvider>
         <Routes>
           <Route path="/" element={<Login />} />
+          <Route path="/auth/callback" element={<AuthCallback />} />
           <Route
             element={
               <ProtectedRoute>
