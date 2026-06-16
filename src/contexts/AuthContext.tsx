@@ -9,8 +9,7 @@ interface AuthContextValue {
   profile: Profile | null
   licence: Licence | null
   loading: boolean
-  signIn: (email: string, password: string) => Promise<string | null>
-  signUp: (email: string, password: string, username: string) => Promise<string | null>
+  signInWithDiscord: () => Promise<string | null>
   signOut: () => Promise<void>
 }
 
@@ -23,11 +22,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [licence, setLicence] = useState<Licence | null>(null)
   const [loading, setLoading] = useState(true)
 
-  async function loadUserData(userId: string) {
+  async function ensureDiscordProfile(currentUser: User) {
+    const identity = currentUser.identities?.find(item => item.provider === 'discord')
+    const identityData = identity?.identity_data ?? currentUser.user_metadata ?? {}
+    const discordId = identityData.provider_id ?? identityData.sub ?? null
+    const username = identityData.full_name ?? identityData.name ?? identityData.user_name ?? identityData.preferred_username ?? currentUser.email ?? null
+    const avatarUrl = identityData.avatar_url ?? null
+
+    await supabase
+      .from('profiles')
+      .upsert({
+        id: currentUser.id,
+        discord_id: discordId,
+        username,
+        avatar_url: avatarUrl,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'id' })
+  }
+
+  async function loadUserData(currentUser: User) {
+    await ensureDiscordProfile(currentUser)
+
     const [{ data: profileData }, { data: licenceData }] = await Promise.all([
-      supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
-      supabase.from('licences').select('*').eq('user_id', userId).maybeSingle(),
+      supabase.from('profiles').select('*').eq('id', currentUser.id).maybeSingle(),
+      supabase.from('licences').select('*').eq('user_id', currentUser.id).maybeSingle(),
     ])
+
     setProfile(profileData ?? null)
     setLicence(licenceData ?? null)
   }
@@ -37,17 +57,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(session)
       setUser(session?.user ?? null)
       if (session?.user) {
-        loadUserData(session.user.id).finally(() => setLoading(false))
+        loadUserData(session.user).finally(() => setLoading(false))
       } else {
         setLoading(false)
       }
     })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
       setUser(session?.user ?? null)
       if (session?.user) {
-        ;(async () => { await loadUserData(session.user.id) })()
+        ;(async () => { await loadUserData(session.user) })()
       } else {
         setProfile(null)
         setLicence(null)
@@ -57,30 +77,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe()
   }, [])
 
-  async function signIn(email: string, password: string): Promise<string | null> {
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) return error.message
-    return null
-  }
+  async function signInWithDiscord(): Promise<string | null> {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'discord',
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      },
+    })
 
-  async function signUp(email: string, password: string, username: string): Promise<string | null> {
-    const res = await fetch(
-      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/auth-signup`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-        },
-        body: JSON.stringify({ email, password, username }),
-      }
-    )
-
-    const data = await res.json() as { success?: boolean; error?: string }
-    if (!res.ok || data.error) return data.error ?? 'Sign up failed'
-
-    // Auto sign in after successful registration
-    return signIn(email, password)
+    return error?.message ?? null
   }
 
   async function signOut() {
@@ -90,7 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ session, user, profile, licence, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ session, user, profile, licence, loading, signInWithDiscord, signOut }}>
       {children}
     </AuthContext.Provider>
   )
