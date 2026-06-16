@@ -68,9 +68,7 @@ export default function AddNode() {
   }
 
   const installCmd = createdNode
-    ? `curl -fsSL ${panelUrl}/install/linux.sh | sudo bash -s -- \
-  --panel-url ${panelUrl} \
-  --token ${createdNode.registration_token}`
+    ? `curl -fsSL ${panelUrl}/install/linux.sh | sudo bash -s -- --panel-url ${panelUrl} --token ${createdNode.registration_token}`
     : ''
 
   if (createdNode) {
@@ -91,7 +89,7 @@ export default function AddNode() {
             <Check className="w-4 h-4 text-emerald-400" />
           </div>
           <div>
-            <p className="text-emerald-300 font-semibold text-sm">Node "{createdNode.name}" created</p>
+            <p className="text-emerald-300 font-semibold text-sm">Node \"{createdNode.name}\" created</p>
             <p className="text-emerald-400/70 text-xs mt-1">Run the install command below on your VPS to register this node.</p>
           </div>
         </div>
@@ -103,8 +101,7 @@ export default function AddNode() {
               <span className="text-sm font-semibold text-slate-200">Install Command</span>
             </div>
             <button
-              onClick={() => copyToClipboard(installCmd.replace(/\
-\s+/g, ' '))}
+              onClick={() => copyToClipboard(installCmd)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
             >
               {copied ? <><Check className="w-3 h-3 text-emerald-400" />Copied!</> : <><Copy className="w-3 h-3" />Copy</>}
