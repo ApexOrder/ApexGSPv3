@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { JobContext } from './index.js'
 
@@ -42,6 +43,14 @@ function resolveInstallTarget(payload: CreateServerPayload) {
   return { name, slug, root, installPath }
 }
 
+async function createFolderLayout(root: string, installPath: string) {
+  await fs.mkdir(root, { recursive: true })
+  await fs.mkdir(installPath, { recursive: true })
+  await fs.mkdir(path.join(installPath, 'Saves'), { recursive: true })
+  await fs.mkdir(path.join(installPath, 'Logs'), { recursive: true })
+  await fs.mkdir(path.join(installPath, 'Backups'), { recursive: true })
+}
+
 export async function createServer(payload: unknown, ctx?: JobContext) {
   const input = readPayload(payload)
   const game = input.game || '7dtd'
@@ -53,12 +62,18 @@ export async function createServer(payload: unknown, ctx?: JobContext) {
   const target = resolveInstallTarget(input)
 
   await ctx?.reportProgress({ progress: 20, message: 'create_server request validated', game: '7dtd', path: target.installPath })
+  await ctx?.reportProgress({ progress: 35, message: 'Creating server folder layout', path: target.installPath })
+
+  await createFolderLayout(target.root, target.installPath)
+
+  await ctx?.reportProgress({ progress: 45, message: 'Server folder layout created', path: target.installPath })
 
   return {
-    message: 'create_server request validated',
+    message: 'Server folder layout created',
     game: '7dtd',
     appId: '294420',
     installed: false,
+    provisioned: true,
     ...target,
   }
 }
