@@ -3,6 +3,7 @@ import path from 'node:path'
 import type { JobContext } from './index.js'
 
 const DEFAULT_SERVERS_ROOT = '/opt/apexgsp/servers'
+const SERVER_EXECUTABLES = ['7DaysToDieServer.x86_64', '7DaysToDieServer.x86']
 
 type CreateServerPayload = {
   game?: string
@@ -51,6 +52,24 @@ async function createFolderLayout(root: string, installPath: string) {
   await fs.mkdir(path.join(installPath, 'Backups'), { recursive: true })
 }
 
+async function pathExists(filePath: string) {
+  try {
+    await fs.access(filePath)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function findServerExecutable(installPath: string) {
+  for (const fileName of SERVER_EXECUTABLES) {
+    const executablePath = path.join(installPath, fileName)
+    if (await pathExists(executablePath)) return executablePath
+  }
+
+  return null
+}
+
 export async function createServer(payload: unknown, ctx?: JobContext) {
   const input = readPayload(payload)
   const game = input.game || '7dtd'
@@ -65,6 +84,21 @@ export async function createServer(payload: unknown, ctx?: JobContext) {
   await ctx?.reportProgress({ progress: 35, message: 'Creating server folder layout', path: target.installPath })
 
   await createFolderLayout(target.root, target.installPath)
+
+  const existingExecutable = await findServerExecutable(target.installPath)
+  if (existingExecutable) {
+    await ctx?.reportProgress({ progress: 100, message: '7 Days To Die server already installed', path: target.installPath, executablePath: existingExecutable })
+
+    return {
+      message: '7 Days To Die server already installed',
+      game: '7dtd',
+      appId: '294420',
+      installed: true,
+      alreadyInstalled: true,
+      executablePath: existingExecutable,
+      ...target,
+    }
+  }
 
   await ctx?.reportProgress({ progress: 45, message: 'Server folder layout created', path: target.installPath })
 
