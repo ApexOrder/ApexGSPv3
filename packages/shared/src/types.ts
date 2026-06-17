@@ -38,6 +38,23 @@ export interface Node {
   updated_at: string
 }
 
+export type GameServerStatus = 'installing' | 'stopped' | 'starting' | 'running' | 'stopping' | 'error'
+
+export interface GameServer {
+  id: string
+  user_id: string
+  node_id: string
+  name: string
+  slug: string
+  game: string
+  install_path: string
+  executable_path: string | null
+  status: GameServerStatus
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
 export interface Heartbeat {
   id: string
   node_id: string
