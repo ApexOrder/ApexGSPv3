@@ -31,6 +31,39 @@ async function authenticateNode(supabase: ReturnType<typeof createClient>, node_
   return node;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+async function upsertServerFromCompletedJob(supabase: ReturnType<typeof createClient>, job_id: string, node_id: string, result: unknown) {
+  if (!isRecord(result)) return;
+  if (result.game !== "7dtd" || result.installed !== true) return;
+
+  const { data: job } = await supabase
+    .from("jobs")
+    .select("user_id")
+    .eq("id", job_id)
+    .eq("node_id", node_id)
+    .maybeSingle();
+
+  if (!job?.user_id) return;
+
+  await supabase
+    .from("servers")
+    .upsert({
+      user_id: job.user_id,
+      node_id,
+      name: String(result.name ?? "7 Days To Die Server"),
+      slug: String(result.slug ?? "7dtd-server"),
+      game: "7dtd",
+      install_path: String(result.installPath ?? result.path ?? ""),
+      executable_path: typeof result.executablePath === "string" ? result.executablePath : null,
+      status: "stopped",
+      metadata: result,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "node_id,slug" });
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -179,6 +212,10 @@ Deno.serve(async (req: Request) => {
         .eq("node_id", node.id);
 
       if (updateErr) return err("Failed to complete job", 500);
+
+      if (status === "completed") {
+        await upsertServerFromCompletedJob(supabase, job_id, node.id, result);
+      }
 
       return json({ success: true });
     }
