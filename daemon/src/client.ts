@@ -26,6 +26,15 @@ export async function fetchNextJob(config: DaemonConfig) {
   })
 }
 
+export async function reportJobProgress(config: DaemonConfig, jobId: string, result: unknown) {
+  return postJson<{ success: boolean }>(`${config.apiUrl}/jobs/progress`, {
+    node_id: config.nodeId,
+    node_secret: config.nodeSecret,
+    job_id: jobId,
+    result,
+  })
+}
+
 export async function completeJob(config: DaemonConfig, jobId: string, status: 'completed' | 'failed', result: unknown, error?: string) {
   return postJson<{ success: boolean }>(`${config.apiUrl}/jobs/complete`, {
     node_id: config.nodeId,
