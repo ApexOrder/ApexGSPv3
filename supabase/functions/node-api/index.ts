@@ -143,6 +143,26 @@ Deno.serve(async (req: Request) => {
       return json({ success: true, job: claimed });
     }
 
+    if (req.method === "POST" && path === "/jobs/progress") {
+      const body = await req.json();
+      const { node_id, node_secret, job_id, result } = body;
+      const node = await authenticateNode(supabase, node_id, node_secret);
+
+      if (!node) return err("Invalid credentials", 401);
+      if (!job_id) return err("Missing job_id");
+
+      const { error: updateErr } = await supabase
+        .from("jobs")
+        .update({ result: result ?? null, updated_at: new Date().toISOString() })
+        .eq("id", job_id)
+        .eq("node_id", node.id)
+        .eq("status", "running");
+
+      if (updateErr) return err("Failed to update job progress", 500);
+
+      return json({ success: true });
+    }
+
     if (req.method === "POST" && path === "/jobs/complete") {
       const body = await req.json();
       const { node_id, node_secret, job_id, status, result, error } = body;
