@@ -18,6 +18,19 @@ function err(message: string, status = 400) {
   return json({ error: message }, status);
 }
 
+async function authenticateNode(supabase: ReturnType<typeof createClient>, node_id: string, node_secret: string) {
+  if (!node_id || !node_secret) return null;
+
+  const { data: node } = await supabase
+    .from("nodes")
+    .select("id")
+    .eq("id", node_id)
+    .eq("node_secret", node_secret)
+    .maybeSingle();
+
+  return node;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -33,7 +46,6 @@ Deno.serve(async (req: Request) => {
   );
 
   try {
-    // POST /node-api/register
     if (req.method === "POST" && path === "/register") {
       const body = await req.json();
       const { token, hostname, ip_address, daemon_version } = body;
@@ -73,21 +85,12 @@ Deno.serve(async (req: Request) => {
       return json({ success: true, node_id: node.id, node_secret: node.node_secret });
     }
 
-    // POST /node-api/heartbeat
     if (req.method === "POST" && path === "/heartbeat") {
       const body = await req.json();
       const { node_id, node_secret, daemon_version, metadata } = body;
+      const node = await authenticateNode(supabase, node_id, node_secret);
 
-      if (!node_id || !node_secret) return err("Missing node_id or node_secret");
-
-      const { data: node, error: findErr } = await supabase
-        .from("nodes")
-        .select("id")
-        .eq("id", node_id)
-        .eq("node_secret", node_secret)
-        .maybeSingle();
-
-      if (findErr || !node) return err("Invalid credentials", 401);
+      if (!node) return err("Invalid credentials", 401);
 
       const now = new Date().toISOString();
 
@@ -107,7 +110,59 @@ Deno.serve(async (req: Request) => {
       return json({ success: true, timestamp: now });
     }
 
-    // GET /node-api/health
+    if (req.method === "POST" && path === "/jobs/next") {
+      const body = await req.json();
+      const { node_id, node_secret } = body;
+      const node = await authenticateNode(supabase, node_id, node_secret);
+
+      if (!node) return err("Invalid credentials", 401);
+
+      const { data: job, error: jobErr } = await supabase
+        .from("jobs")
+        .select("id, node_id, user_id, type, payload, status, created_at, updated_at")
+        .eq("node_id", node.id)
+        .eq("status", "pending")
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (jobErr) return err("Failed to fetch jobs", 500);
+      if (!job) return json({ success: true, job: null });
+
+      const now = new Date().toISOString();
+      const { data: claimed, error: claimErr } = await supabase
+        .from("jobs")
+        .update({ status: "running", updated_at: now })
+        .eq("id", job.id)
+        .eq("status", "pending")
+        .select("id, node_id, user_id, type, payload, status, created_at, updated_at")
+        .single();
+
+      if (claimErr || !claimed) return err("Failed to claim job", 409);
+
+      return json({ success: true, job: claimed });
+    }
+
+    if (req.method === "POST" && path === "/jobs/complete") {
+      const body = await req.json();
+      const { node_id, node_secret, job_id, status, result, error } = body;
+      const node = await authenticateNode(supabase, node_id, node_secret);
+
+      if (!node) return err("Invalid credentials", 401);
+      if (!job_id) return err("Missing job_id");
+      if (!["completed", "failed"].includes(status)) return err("Invalid job status");
+
+      const { error: updateErr } = await supabase
+        .from("jobs")
+        .update({ status, result: result ?? null, error: error ?? null, updated_at: new Date().toISOString() })
+        .eq("id", job_id)
+        .eq("node_id", node.id);
+
+      if (updateErr) return err("Failed to complete job", 500);
+
+      return json({ success: true });
+    }
+
     if (req.method === "GET" && path === "/health") {
       return json({ status: "ok", timestamp: new Date().toISOString() });
     }
