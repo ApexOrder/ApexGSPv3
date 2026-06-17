@@ -1,6 +1,7 @@
 import { testPing } from './testPing.js'
 import { detectTools } from './detectTools.js'
 import { installSteamcmd } from './installSteamcmd.js'
+import { createServer } from './createServer.js'
 
 export interface JobContext {
   reportProgress: (result: Record<string, unknown>) => Promise<void>
@@ -14,6 +15,8 @@ export async function runJob(type: string, payload: unknown, ctx?: JobContext) {
       return detectTools()
     case 'install_steamcmd':
       return installSteamcmd(payload, ctx)
+    case 'create_server':
+      return createServer(payload, ctx)
     default:
       throw new Error(`Unsupported job type: ${type}`)
   }
