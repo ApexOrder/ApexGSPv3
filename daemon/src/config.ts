@@ -6,6 +6,7 @@ export interface DaemonConfig {
   envPath: string
   panelUrl: string
   apiUrl: string
+  supabaseAnonKey: string
   registrationToken: string
   nodeId: string
   nodeSecret: string
@@ -26,12 +27,14 @@ export function loadConfig(): DaemonConfig {
 
   const panelUrl = requireValue('APEXGSP_PANEL_URL', process.env.APEXGSP_PANEL_URL)
   const apiUrl = requireValue('APEXGSP_API_URL', process.env.APEXGSP_API_URL)
+  const supabaseAnonKey = requireValue('APEXGSP_SUPABASE_ANON_KEY', process.env.APEXGSP_SUPABASE_ANON_KEY)
   const registrationToken = process.env.APEXGSP_REGISTRATION_TOKEN?.trim() || ''
 
   return {
     envPath,
     panelUrl,
     apiUrl,
+    supabaseAnonKey,
     registrationToken,
     nodeId: process.env.APEXGSP_NODE_ID?.trim() || '',
     nodeSecret: process.env.APEXGSP_NODE_SECRET?.trim() || '',
