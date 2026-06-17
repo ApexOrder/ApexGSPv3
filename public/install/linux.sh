@@ -6,6 +6,7 @@ API_URL=""
 REGISTRATION_TOKEN=""
 INSTALL_DIR="/opt/apexgsp-daemon"
 SERVICE_NAME="apexgspd"
+REPO_ZIP_URL="https://github.com/ApexOrder/ApexGSPv3/archive/refs/heads/main.zip"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -55,154 +56,57 @@ if [[ -z "$API_URL" ]]; then
 fi
 
 cat <<BANNER
-ApexGSP daemon installer
+ApexGSP TypeScript daemon installer
 Panel: $PANEL_URL
 API: $API_URL
 Install dir: $INSTALL_DIR
 BANNER
 
+if ! command -v node >/dev/null 2>&1; then
+  echo "Node.js is required. Install Node.js 20+ before running this installer."
+  exit 1
+fi
+
+if ! command -v npm >/dev/null 2>&1; then
+  echo "npm is required. Install npm before running this installer."
+  exit 1
+fi
+
+apt-get update -y >/dev/null
+apt-get install -y curl unzip >/dev/null
+
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+curl -fsSL "$REPO_ZIP_URL" -o "$TMP_DIR/apexgsp.zip"
+unzip -q "$TMP_DIR/apexgsp.zip" -d "$TMP_DIR"
+
 mkdir -p "$INSTALL_DIR"
+rsync -a --delete "$TMP_DIR/ApexGSPv3-main/daemon/" "$INSTALL_DIR/"
+
+if [[ -f "$INSTALL_DIR/.env" ]]; then
+  existing_node_id="$(grep '^APEXGSP_NODE_ID=' "$INSTALL_DIR/.env" | cut -d= -f2- || true)"
+  existing_node_secret="$(grep '^APEXGSP_NODE_SECRET=' "$INSTALL_DIR/.env" | cut -d= -f2- || true)"
+else
+  existing_node_id=""
+  existing_node_secret=""
+fi
 
 cat > "$INSTALL_DIR/.env" <<ENV
 APEXGSP_PANEL_URL=$PANEL_URL
 APEXGSP_API_URL=$API_URL
 APEXGSP_REGISTRATION_TOKEN=$REGISTRATION_TOKEN
-APEXGSP_NODE_ID=
-APEXGSP_NODE_SECRET=
+APEXGSP_NODE_ID=$existing_node_id
+APEXGSP_NODE_SECRET=$existing_node_secret
+APEXGSP_HEARTBEAT_INTERVAL_MS=30000
+APEXGSP_JOB_POLL_INTERVAL_MS=30000
 ENV
 
-cat > "$INSTALL_DIR/apexgspd.sh" <<'DAEMON'
-#!/usr/bin/env bash
-set -euo pipefail
+chmod 600 "$INSTALL_DIR/.env"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="$SCRIPT_DIR/.env"
-
-if [[ ! -f "$ENV_FILE" ]]; then
-  echo "Missing env file: $ENV_FILE" >&2
-  exit 1
-fi
-
-set -a
-source "$ENV_FILE"
-set +a
-
-HOSTNAME_VALUE="$(hostname)"
-DAEMON_VERSION="0.1.0"
-
-log() {
-  echo "[$(date -Is)] $*"
-}
-
-json_get() {
-  python3 -c "import json,sys; data=json.load(sys.stdin); path='$1'.split('.'); cur=data
-for p in path:
-    cur=(cur or {}).get(p,'') if isinstance(cur,dict) else ''
-print(cur if cur is not None else '')"
-}
-
-save_env_value() {
-  local key="$1"
-  local value="$2"
-  if grep -q "^${key}=" "$ENV_FILE"; then
-    sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
-  else
-    echo "${key}=${value}" >> "$ENV_FILE"
-  fi
-}
-
-post_json() {
-  local endpoint="$1"
-  local payload="$2"
-  curl -fsS -X POST "${APEXGSP_API_URL}${endpoint}" \
-    -H "Content-Type: application/json" \
-    -d "$payload"
-}
-
-register_node() {
-  if [[ -n "${APEXGSP_NODE_ID:-}" && -n "${APEXGSP_NODE_SECRET:-}" ]]; then
-    log "Node already registered: $APEXGSP_NODE_ID"
-    return
-  fi
-
-  log "Registering node with ApexGSP..."
-
-  response="$(post_json "/register" "{\"token\":\"${APEXGSP_REGISTRATION_TOKEN}\",\"hostname\":\"${HOSTNAME_VALUE}\",\"daemon_version\":\"${DAEMON_VERSION}\"}")"
-
-  node_id="$(printf '%s' "$response" | json_get node_id)"
-  node_secret="$(printf '%s' "$response" | json_get node_secret)"
-
-  if [[ -z "$node_id" || -z "$node_secret" ]]; then
-    log "Registration response did not include node credentials."
-    log "$response"
-    exit 1
-  fi
-
-  save_env_value "APEXGSP_NODE_ID" "$node_id"
-  save_env_value "APEXGSP_NODE_SECRET" "$node_secret"
-
-  APEXGSP_NODE_ID="$node_id"
-  APEXGSP_NODE_SECRET="$node_secret"
-
-  log "Node registered: $APEXGSP_NODE_ID"
-}
-
-send_heartbeat() {
-  post_json "/heartbeat" "{\"node_id\":\"${APEXGSP_NODE_ID}\",\"node_secret\":\"${APEXGSP_NODE_SECRET}\",\"daemon_version\":\"${DAEMON_VERSION}\",\"metadata\":{\"hostname\":\"${HOSTNAME_VALUE}\"}}" >/dev/null
-}
-
-complete_job() {
-  local job_id="$1"
-  local status="$2"
-  local message="$3"
-
-  post_json "/jobs/complete" "{\"node_id\":\"${APEXGSP_NODE_ID}\",\"node_secret\":\"${APEXGSP_NODE_SECRET}\",\"job_id\":\"${job_id}\",\"status\":\"${status}\",\"result\":{\"message\":\"${message}\"}}" >/dev/null
-}
-
-poll_job() {
-  response="$(post_json "/jobs/next" "{\"node_id\":\"${APEXGSP_NODE_ID}\",\"node_secret\":\"${APEXGSP_NODE_SECRET}\"}")"
-  job_id="$(printf '%s' "$response" | json_get job.id)"
-
-  if [[ -z "$job_id" ]]; then
-    return 0
-  fi
-
-  job_type="$(printf '%s' "$response" | json_get job.type)"
-  log "Running job ${job_id}: ${job_type}"
-
-  case "$job_type" in
-    test_ping)
-      complete_job "$job_id" "completed" "Pong from ${HOSTNAME_VALUE}"
-      log "Completed test_ping job ${job_id}"
-      ;;
-    *)
-      complete_job "$job_id" "failed" "Unsupported job type: ${job_type}"
-      log "Failed unsupported job ${job_id}: ${job_type}"
-      ;;
-  esac
-}
-
-main_loop() {
-  while true; do
-    if send_heartbeat; then
-      log "Heartbeat sent."
-    else
-      log "Heartbeat failed."
-    fi
-
-    if ! poll_job; then
-      log "Job poll failed."
-    fi
-
-    sleep 30
-  done
-}
-
-register_node
-main_loop
-DAEMON
-
-chmod +x "$INSTALL_DIR/apexgspd.sh"
+cd "$INSTALL_DIR"
+npm install --omit=dev=false
+npm run build
 
 cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<SERVICE
 [Unit]
@@ -213,10 +117,11 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=$INSTALL_DIR
-ExecStart=$INSTALL_DIR/apexgspd.sh
+ExecStart=/usr/bin/env node $INSTALL_DIR/dist/index.js
 Restart=always
 RestartSec=10
 User=root
+Environment=NODE_ENV=production
 
 [Install]
 WantedBy=multi-user.target
@@ -227,7 +132,7 @@ systemctl enable "$SERVICE_NAME"
 systemctl restart "$SERVICE_NAME"
 
 cat <<DONE
-ApexGSP daemon installed.
+ApexGSP TypeScript daemon installed.
 
 Useful commands:
   systemctl status $SERVICE_NAME --no-pager
