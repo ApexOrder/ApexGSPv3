@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Server, Wifi, WifiOff, Clock, Plus, Trash2, RefreshCw, Send } from 'lucide-react'
+import { Server, Wifi, WifiOff, Clock, Plus, Trash2, RefreshCw, Send, Download } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { timeAgo, cn } from '@/lib/utils'
@@ -8,12 +8,21 @@ import type { Node } from '@/lib/types'
 
 type JobStatus = 'pending' | 'running' | 'completed' | 'failed'
 
+interface NodeJobResult {
+  message?: string
+  progress?: number
+  path?: string
+  version?: string | null
+  installed?: boolean
+  alreadyInstalled?: boolean
+}
+
 interface NodeJob {
   id: string
   node_id: string
   type: string
   status: JobStatus
-  result: { message?: string } | null
+  result: NodeJobResult | null
   error: string | null
   created_at: string
   updated_at: string
@@ -85,15 +94,15 @@ export default function Nodes() {
     setDeletingId(null)
   }
 
-  async function sendTestJob(node: Node) {
+  async function sendNodeJob(node: Node, type: 'test_ping' | 'install_steamcmd') {
     if (!user) return
 
-    setSendingJobId(node.id)
+    setSendingJobId(`${node.id}:${type}`)
 
     const { error } = await supabase.from('jobs').insert({
       node_id: node.id,
       user_id: user.id,
-      type: 'test_ping',
+      type,
       payload: { requested_at: new Date().toISOString() },
       status: 'pending',
     })
@@ -179,9 +188,11 @@ export default function Nodes() {
               node={node}
               latestJob={jobs[node.id] ?? null}
               onDelete={deleteNode}
-              onSendTestJob={sendTestJob}
+              onSendTestJob={node => sendNodeJob(node, 'test_ping')}
+              onInstallSteamcmd={node => sendNodeJob(node, 'install_steamcmd')}
               deleting={deletingId === node.id}
-              sendingJob={sendingJobId === node.id}
+              sendingTestJob={sendingJobId === `${node.id}:test_ping`}
+              sendingInstallJob={sendingJobId === `${node.id}:install_steamcmd`}
             />
           ))}
         </div>
@@ -195,15 +206,19 @@ function NodeCard({
   latestJob,
   onDelete,
   onSendTestJob,
+  onInstallSteamcmd,
   deleting,
-  sendingJob,
+  sendingTestJob,
+  sendingInstallJob,
 }: {
   node: Node
   latestJob: NodeJob | null
   onDelete: (id: string) => void
   onSendTestJob: (node: Node) => void
+  onInstallSteamcmd: (node: Node) => void
   deleting: boolean
-  sendingJob: boolean
+  sendingTestJob: boolean
+  sendingInstallJob: boolean
 }) {
   const statusConfig: Record<string, { icon: typeof Wifi; label: string; badgeClass: string; dotClass: string }> = {
     online:  { icon: Wifi,    label: 'Online',  badgeClass: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20', dotClass: 'bg-emerald-400' },
@@ -212,7 +227,9 @@ function NodeCard({
   }
   const st = statusConfig[node.status] ?? statusConfig.offline
   const StIcon = st.icon
-  const canSendJob = node.status === 'online' && !sendingJob
+  const jobBusy = latestJob?.status === 'pending' || latestJob?.status === 'running'
+  const canSendJob = node.status === 'online' && !sendingTestJob && !sendingInstallJob && !jobBusy
+  const progress = typeof latestJob?.result?.progress === 'number' ? latestJob.result.progress : null
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 hover:border-slate-700 transition-colors">
@@ -267,18 +284,36 @@ function NodeCard({
                   {latestJob.result?.message ?? latestJob.error}
                 </p>
               )}
+              {progress !== null && latestJob.status === 'running' && (
+                <div className="mt-2 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                  <div className="h-full rounded-full bg-brand-500 transition-all duration-500" style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} />
+                </div>
+              )}
+              {latestJob.result?.path && (
+                <p className="text-xs text-slate-600 mt-1 font-mono truncate">{latestJob.result.path}</p>
+              )}
             </div>
           )}
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
           <button
+            onClick={() => onInstallSteamcmd(node)}
+            disabled={!canSendJob}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Install SteamCMD"
+          >
+            {sendingInstallJob ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            SteamCMD
+          </button>
+
+          <button
             onClick={() => onSendTestJob(node)}
             disabled={!canSendJob}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-brand-600/15 text-brand-300 border border-brand-500/20 hover:bg-brand-600/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             title="Send test job"
           >
-            {sendingJob ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+            {sendingTestJob ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
             Test Job
           </button>
 
