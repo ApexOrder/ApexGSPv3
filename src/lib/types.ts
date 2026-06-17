@@ -4,6 +4,8 @@ export type {
   LicenceStatus,
   Node,
   NodeStatus,
+  GameServer,
+  GameServerStatus,
   Heartbeat,
   Job,
   JobStatus,
