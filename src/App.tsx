@@ -7,6 +7,7 @@ import AuthCallback from '@/pages/AuthCallback'
 import Dashboard from '@/pages/Dashboard'
 import Nodes from '@/pages/Nodes'
 import AddNode from '@/pages/AddNode'
+import Servers from '@/pages/Servers'
 import NewServer from '@/pages/NewServer'
 import Profile from '@/pages/Profile'
 import Settings from '@/pages/Settings'
@@ -28,6 +29,7 @@ export default function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/nodes" element={<Nodes />} />
             <Route path="/nodes/add" element={<AddNode />} />
+            <Route path="/servers" element={<Servers />} />
             <Route path="/servers/new" element={<NewServer />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/settings" element={<Settings />} />
