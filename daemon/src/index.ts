@@ -1,6 +1,6 @@
 import os from 'node:os'
 import { loadConfig, persistEnvValue } from './config.js'
-import { completeJob, fetchNextJob, registerNode, sendHeartbeat } from './client.js'
+import { completeJob, fetchNextJob, registerNode, reportJobProgress, sendHeartbeat } from './client.js'
 import { runJob } from './jobs/index.js'
 
 const DAEMON_VERSION = '0.1.0-ts'
@@ -62,7 +62,11 @@ async function jobLoop() {
         log(`Running job ${next.job.id}: ${next.job.type}`)
 
         try {
-          const result = await runJob(next.job.type, next.job.payload)
+          const result = await runJob(next.job.type, next.job.payload, {
+            reportProgress: async result => {
+              await reportJobProgress(config, next.job!.id, result)
+            },
+          })
           await completeJob(config, next.job.id, 'completed', result)
           log(`Completed job ${next.job.id}: ${next.job.type}`)
         } catch (error) {
