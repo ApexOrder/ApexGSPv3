@@ -22,6 +22,8 @@ export default function AddNode() {
   const [copied, setCopied] = useState(false)
 
   const panelUrl = (import.meta.env.VITE_APP_URL as string | undefined)?.replace(/\/$/, '') || window.location.origin
+  const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\/$/, '')
+  const nodeApiUrl = supabaseUrl ? `${supabaseUrl}/functions/v1/node-api` : `${panelUrl}/node-api`
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
@@ -62,13 +64,17 @@ export default function AddNode() {
   }
 
   async function copyToClipboard(text: string) {
-    await navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setError('Copy failed. Select the command and copy it manually.')
+    }
   }
 
   const installCmd = createdNode
-    ? `curl -fsSL ${panelUrl}/install/linux.sh | sudo bash -s -- --panel-url ${panelUrl} --token ${createdNode.registration_token}`
+    ? `curl -fsSL ${panelUrl}/install/linux.sh | sudo bash -s -- --panel-url ${panelUrl} --api-url ${nodeApiUrl} --token ${createdNode.registration_token}`
     : ''
 
   if (createdNode) {
@@ -89,7 +95,7 @@ export default function AddNode() {
             <Check className="w-4 h-4 text-emerald-400" />
           </div>
           <div>
-            <p className="text-emerald-300 font-semibold text-sm">Node \"{createdNode.name}\" created</p>
+            <p className="text-emerald-300 font-semibold text-sm">Node &quot;{createdNode.name}&quot; created</p>
             <p className="text-emerald-400/70 text-xs mt-1">Run the install command below on your VPS to register this node.</p>
           </div>
         </div>
@@ -107,7 +113,7 @@ export default function AddNode() {
               {copied ? <><Check className="w-3 h-3 text-emerald-400" />Copied!</> : <><Copy className="w-3 h-3" />Copy</>}
             </button>
           </div>
-          <pre className="px-5 py-4 text-xs font-mono text-brand-300 leading-relaxed overflow-x-auto bg-slate-950/50">
+          <pre className="px-5 py-4 text-xs font-mono text-brand-300 leading-relaxed overflow-x-auto bg-slate-950/50 select-all">
             {installCmd}
           </pre>
         </div>
