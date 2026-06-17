@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { runCommand } from '../utils/exec.js'
 import type { JobContext } from './index.js'
 
 const DEFAULT_SERVERS_ROOT = '/opt/apexgsp/servers'
@@ -70,6 +71,18 @@ async function findServerExecutable(installPath: string) {
   return null
 }
 
+async function findSteamToolPath() {
+  const which = await runCommand('which', ['steamcmd'])
+  if (which.ok && which.stdout) return which.stdout.split('\n')[0]
+
+  for (const candidate of ['/usr/games/steamcmd', '/usr/bin/steamcmd', '/usr/local/bin/steamcmd']) {
+    const exists = await runCommand('test', ['-x', candidate])
+    if (exists.ok) return candidate
+  }
+
+  return null
+}
+
 export async function createServer(payload: unknown, ctx?: JobContext) {
   const input = readPayload(payload)
   const game = input.game || '7dtd'
@@ -100,14 +113,18 @@ export async function createServer(payload: unknown, ctx?: JobContext) {
     }
   }
 
-  await ctx?.reportProgress({ progress: 45, message: 'Server folder layout created', path: target.installPath })
+  const steamToolPath = await findSteamToolPath()
+  if (!steamToolPath) throw new Error('SteamCMD is not installed. Run install_steamcmd first.')
+
+  await ctx?.reportProgress({ progress: 45, message: 'SteamCMD found, ready to install server', path: steamToolPath })
 
   return {
-    message: 'Server folder layout created',
+    message: 'SteamCMD found, ready to install server',
     game: '7dtd',
     appId: '294420',
     installed: false,
     provisioned: true,
+    steamcmdPath: steamToolPath,
     ...target,
   }
 }
