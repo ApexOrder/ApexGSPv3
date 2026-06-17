@@ -95,7 +95,10 @@ log() {
 }
 
 json_get() {
-  python3 -c "import json,sys; print(json.load(sys.stdin).get('$1',''))"
+  python3 -c "import json,sys; data=json.load(sys.stdin); path='$1'.split('.'); cur=data
+for p in path:
+    cur=(cur or {}).get(p,'') if isinstance(cur,dict) else ''
+print(cur if cur is not None else '')"
 }
 
 save_env_value() {
@@ -108,6 +111,14 @@ save_env_value() {
   fi
 }
 
+post_json() {
+  local endpoint="$1"
+  local payload="$2"
+  curl -fsS -X POST "${APEXGSP_API_URL}${endpoint}" \
+    -H "Content-Type: application/json" \
+    -d "$payload"
+}
+
 register_node() {
   if [[ -n "${APEXGSP_NODE_ID:-}" && -n "${APEXGSP_NODE_SECRET:-}" ]]; then
     log "Node already registered: $APEXGSP_NODE_ID"
@@ -116,9 +127,7 @@ register_node() {
 
   log "Registering node with ApexGSP..."
 
-  response="$(curl -fsS -X POST "${APEXGSP_API_URL}/register" \
-    -H "Content-Type: application/json" \
-    -d "{\"token\":\"${APEXGSP_REGISTRATION_TOKEN}\",\"hostname\":\"${HOSTNAME_VALUE}\",\"daemon_version\":\"${DAEMON_VERSION}\"}")"
+  response="$(post_json "/register" "{\"token\":\"${APEXGSP_REGISTRATION_TOKEN}\",\"hostname\":\"${HOSTNAME_VALUE}\",\"daemon_version\":\"${DAEMON_VERSION}\"}")"
 
   node_id="$(printf '%s' "$response" | json_get node_id)"
   node_secret="$(printf '%s' "$response" | json_get node_secret)"
@@ -139,24 +148,58 @@ register_node() {
 }
 
 send_heartbeat() {
-  curl -fsS -X POST "${APEXGSP_API_URL}/heartbeat" \
-    -H "Content-Type: application/json" \
-    -d "{\"node_id\":\"${APEXGSP_NODE_ID}\",\"node_secret\":\"${APEXGSP_NODE_SECRET}\",\"daemon_version\":\"${DAEMON_VERSION}\",\"metadata\":{\"hostname\":\"${HOSTNAME_VALUE}\"}}" >/dev/null
+  post_json "/heartbeat" "{\"node_id\":\"${APEXGSP_NODE_ID}\",\"node_secret\":\"${APEXGSP_NODE_SECRET}\",\"daemon_version\":\"${DAEMON_VERSION}\",\"metadata\":{\"hostname\":\"${HOSTNAME_VALUE}\"}}" >/dev/null
 }
 
-heartbeat_loop() {
+complete_job() {
+  local job_id="$1"
+  local status="$2"
+  local message="$3"
+
+  post_json "/jobs/complete" "{\"node_id\":\"${APEXGSP_NODE_ID}\",\"node_secret\":\"${APEXGSP_NODE_SECRET}\",\"job_id\":\"${job_id}\",\"status\":\"${status}\",\"result\":{\"message\":\"${message}\"}}" >/dev/null
+}
+
+poll_job() {
+  response="$(post_json "/jobs/next" "{\"node_id\":\"${APEXGSP_NODE_ID}\",\"node_secret\":\"${APEXGSP_NODE_SECRET}\"}")"
+  job_id="$(printf '%s' "$response" | json_get job.id)"
+
+  if [[ -z "$job_id" ]]; then
+    return 0
+  fi
+
+  job_type="$(printf '%s' "$response" | json_get job.type)"
+  log "Running job ${job_id}: ${job_type}"
+
+  case "$job_type" in
+    test_ping)
+      complete_job "$job_id" "completed" "Pong from ${HOSTNAME_VALUE}"
+      log "Completed test_ping job ${job_id}"
+      ;;
+    *)
+      complete_job "$job_id" "failed" "Unsupported job type: ${job_type}"
+      log "Failed unsupported job ${job_id}: ${job_type}"
+      ;;
+  esac
+}
+
+main_loop() {
   while true; do
     if send_heartbeat; then
       log "Heartbeat sent."
     else
       log "Heartbeat failed."
     fi
+
+    if ! poll_job; then
+      log "Job poll failed."
+    fi
+
     sleep 30
   done
 }
 
 register_node
-heartbeat_loop
+main_loop
 DAEMON
 
 chmod +x "$INSTALL_DIR/apexgspd.sh"
