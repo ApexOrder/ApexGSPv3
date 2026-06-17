@@ -64,6 +64,22 @@ async function upsertServerFromCompletedJob(supabase: ReturnType<typeof createCl
     }, { onConflict: "node_id,slug" });
 }
 
+async function updateServerStatusFromCompletedJob(supabase: ReturnType<typeof createClient>, node_id: string, result: unknown) {
+  if (!isRecord(result)) return;
+  if (typeof result.serverId !== "string" || typeof result.status !== "string") return;
+  if (!["stopped", "running", "starting", "stopping", "error"].includes(result.status)) return;
+
+  await supabase
+    .from("servers")
+    .update({
+      status: result.status,
+      metadata: result,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", result.serverId)
+    .eq("node_id", node_id);
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -215,6 +231,7 @@ Deno.serve(async (req: Request) => {
 
       if (status === "completed") {
         await upsertServerFromCompletedJob(supabase, job_id, node.id, result);
+        await updateServerStatusFromCompletedJob(supabase, node.id, result);
       }
 
       return json({ success: true });
