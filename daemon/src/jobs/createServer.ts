@@ -5,6 +5,7 @@ import type { JobContext } from './index.js'
 
 const DEFAULT_SERVERS_ROOT = '/opt/apexgsp/servers'
 const SERVER_EXECUTABLES = ['7DaysToDieServer.x86_64', '7DaysToDieServer.x86']
+const SEVEN_DAYS_APP_ID = '294420'
 
 type CreateServerPayload = {
   game?: string
@@ -83,6 +84,21 @@ async function findSteamToolPath() {
   return null
 }
 
+async function installSevenDaysServer(steamToolPath: string, installPath: string) {
+  const args = [
+    '+force_install_dir',
+    installPath,
+    '+login',
+    'anonymous',
+    '+app_update',
+    SEVEN_DAYS_APP_ID,
+    'validate',
+    '+quit',
+  ]
+
+  return runCommand(steamToolPath, args, 30 * 60 * 1000)
+}
+
 export async function createServer(payload: unknown, ctx?: JobContext) {
   const input = readPayload(payload)
   const game = input.game || '7dtd'
@@ -105,7 +121,7 @@ export async function createServer(payload: unknown, ctx?: JobContext) {
     return {
       message: '7 Days To Die server already installed',
       game: '7dtd',
-      appId: '294420',
+      appId: SEVEN_DAYS_APP_ID,
       installed: true,
       alreadyInstalled: true,
       executablePath: existingExecutable,
@@ -116,15 +132,27 @@ export async function createServer(payload: unknown, ctx?: JobContext) {
   const steamToolPath = await findSteamToolPath()
   if (!steamToolPath) throw new Error('SteamCMD is not installed. Run install_steamcmd first.')
 
-  await ctx?.reportProgress({ progress: 45, message: 'SteamCMD found, ready to install server', path: steamToolPath })
+  await ctx?.reportProgress({ progress: 45, message: 'Installing 7 Days To Die dedicated server', path: target.installPath })
+
+  const install = await installSevenDaysServer(steamToolPath, target.installPath)
+  if (!install.ok) {
+    throw new Error(`7 Days To Die install failed: ${install.stderr || install.stdout || install.error}`)
+  }
+
+  await ctx?.reportProgress({ progress: 85, message: 'Verifying 7 Days To Die installation', path: target.installPath })
+
+  const executablePath = await findServerExecutable(target.installPath)
+  if (!executablePath) throw new Error(`7 Days To Die install finished but server executable was not found in ${target.installPath}`)
+
+  await ctx?.reportProgress({ progress: 100, message: '7 Days To Die server installed and verified', path: target.installPath, executablePath })
 
   return {
-    message: 'SteamCMD found, ready to install server',
+    message: '7 Days To Die server installed and verified',
     game: '7dtd',
-    appId: '294420',
-    installed: false,
-    provisioned: true,
-    steamcmdPath: steamToolPath,
+    appId: SEVEN_DAYS_APP_ID,
+    installed: true,
+    alreadyInstalled: false,
+    executablePath,
     ...target,
   }
 }
