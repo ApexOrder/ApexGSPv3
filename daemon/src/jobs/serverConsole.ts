@@ -36,8 +36,8 @@ async function exists(filePath: string) {
 }
 
 async function latestLogFile(installPath: string) {
-  const direct = path.join(installPath, 'Logs', 'server.log')
-  if (await exists(direct)) return direct
+  const apexCurrentRunLog = path.join(installPath, 'Logs', 'apexgsp-server.log')
+  if (await exists(apexCurrentRunLog)) return apexCurrentRunLog
 
   const logsDir = path.join(installPath, 'Logs')
   try {
@@ -87,7 +87,7 @@ export async function getServerLogs(payload: unknown, ctx?: JobContext) {
   const lines = takeLastLines(text, lineCount)
 
   return {
-    message: 'Console log loaded',
+    message: `Console log loaded from ${path.basename(logFile)}`,
     serverId: input.serverId,
     status: 'logs_loaded',
     lines,
