@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Play, RefreshCw, RotateCw, Square, Terminal, Folder, Archive, Settings, Activity } from 'lucide-react'
+import { ArrowLeft, Play, RefreshCw, RotateCw, Square, Terminal, Folder, Archive, Settings, Activity, Cpu, HardDrive, MemoryStick, Clock } from 'lucide-react'
 import { callNodeApi } from '@/lib/nodeApi'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
@@ -18,6 +18,19 @@ type DirectResult = {
   pid?: number | null
 }
 
+type ServerMetrics = {
+  message: string
+  serverId: string
+  status: string
+  pid: number | null
+  cpuPercent: number
+  memoryBytes: number
+  uptimeSeconds: number
+  installSizeBytes: number | null
+  disk: { totalBytes: number; usedBytes: number; freeBytes: number; usedPercent: number } | null
+  collectedAt: string
+}
+
 const statusClass: Record<string, string> = {
   running: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
   stopped: 'bg-slate-700/40 text-slate-300 border-slate-600/30',
@@ -27,11 +40,28 @@ const statusClass: Record<string, string> = {
   error: 'bg-red-500/10 text-red-400 border-red-500/20',
 }
 
+function formatBytes(value?: number | null) {
+  if (!value) return '0 B'
+  if (value < 1024) return `${value} B`
+  if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KB`
+  if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MB`
+  return `${(value / 1024 ** 3).toFixed(1)} GB`
+}
+
+function formatUptime(seconds?: number | null) {
+  if (!seconds) return '00:00:00'
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  const s = Math.floor(seconds % 60)
+  return [h, m, s].map(value => String(value).padStart(2, '0')).join(':')
+}
+
 export default function ServerDetails() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { user, session } = useAuth()
   const [server, setServer] = useState<ServerWithNode | null>(null)
+  const [metrics, setMetrics] = useState<ServerMetrics | null>(null)
   const [loading, setLoading] = useState(true)
   const [action, setAction] = useState<string | null>(null)
   const [message, setMessage] = useState('')
@@ -51,9 +81,32 @@ export default function ServerDetails() {
     setLoading(false)
   }
 
+  async function fetchMetrics(targetServer = server) {
+    if (!targetServer) return
+    try {
+      const result = await callNodeApi<ServerMetrics>(session, 'metrics', {
+        server_id: targetServer.id,
+        installPath: targetServer.install_path,
+      })
+      setMetrics(result)
+      if (result.status && result.status !== targetServer.status) {
+        setServer(prev => prev ? { ...prev, status: result.status } : prev)
+      }
+    } catch (error) {
+      setMessage((error as Error).message)
+    }
+  }
+
   useEffect(() => {
     fetchServer()
   }, [user, id])
+
+  useEffect(() => {
+    if (!server) return
+    fetchMetrics(server)
+    const timer = window.setInterval(() => fetchMetrics(server), 5000)
+    return () => window.clearInterval(timer)
+  }, [server?.id, session?.access_token])
 
   async function runDirect(nextAction: 'status' | 'start' | 'stop' | 'restart') {
     if (!server) return
@@ -75,6 +128,7 @@ export default function ServerDetails() {
       }
 
       setMessage(result.message || `${nextAction} completed`)
+      window.setTimeout(() => fetchMetrics(), 800)
     } catch (error) {
       setMessage((error as Error).message)
     } finally {
@@ -111,7 +165,7 @@ export default function ServerDetails() {
             <h1 className="text-2xl font-bold text-slate-100 tracking-tight">{server.name}</h1>
             <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border capitalize', statusClass[server.status] ?? statusClass.stopped)}>{server.status}</span>
           </div>
-          <p className="text-slate-400 text-sm">7 Days To Die on {server.nodes?.name ?? 'Unknown node'}</p>
+          <p className="text-slate-400 text-sm">7 Days To Die on {server.nodes?.name ?? 'Unknown node'}{metrics?.pid ? ` • PID ${metrics.pid}` : ''}</p>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
@@ -136,10 +190,17 @@ export default function ServerDetails() {
         </div>
       )}
 
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4"><div className="flex items-center gap-2 mb-2"><Cpu className="w-4 h-4 text-brand-400" /><p className="text-xs text-slate-500">CPU</p></div><p className="text-xl font-semibold text-slate-100">{(metrics?.cpuPercent ?? 0).toFixed(1)}%</p></div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4"><div className="flex items-center gap-2 mb-2"><MemoryStick className="w-4 h-4 text-brand-400" /><p className="text-xs text-slate-500">RAM</p></div><p className="text-xl font-semibold text-slate-100">{formatBytes(metrics?.memoryBytes)}</p></div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4"><div className="flex items-center gap-2 mb-2"><HardDrive className="w-4 h-4 text-brand-400" /><p className="text-xs text-slate-500">Install Size</p></div><p className="text-xl font-semibold text-slate-100">{formatBytes(metrics?.installSizeBytes)}</p></div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4"><div className="flex items-center gap-2 mb-2"><Clock className="w-4 h-4 text-brand-400" /><p className="text-xs text-slate-500">Uptime</p></div><p className="text-xl font-semibold text-slate-100">{formatUptime(metrics?.uptimeSeconds)}</p></div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4"><p className="text-xs text-slate-500 mb-1">Node</p><p className="text-sm text-slate-200 font-medium">{server.nodes?.name ?? 'Unknown'}</p><p className="text-xs text-slate-500 mt-1 capitalize">{server.nodes?.status ?? 'unknown'}</p></div>
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4"><p className="text-xs text-slate-500 mb-1">Install path</p><p className="text-xs text-slate-300 font-mono truncate">{server.install_path}</p></div>
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4"><p className="text-xs text-slate-500 mb-1">Created</p><p className="text-sm text-slate-200 font-medium">{timeAgo(server.created_at)}</p></div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4"><p className="text-xs text-slate-500 mb-1">Disk Free</p><p className="text-sm text-slate-200 font-medium">{metrics?.disk ? `${formatBytes(metrics.disk.freeBytes)} free` : 'Unknown'}</p><p className="text-xs text-slate-500 mt-1">{metrics?.disk ? `${metrics.disk.usedPercent}% used` : `Created ${timeAgo(server.created_at)}`}</p></div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
