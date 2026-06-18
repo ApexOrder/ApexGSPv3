@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import fsSync from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { runCommand } from '../utils/exec.js'
@@ -13,6 +14,10 @@ type ServerJobPayload = {
   install_path?: string
   executablePath?: string | null
   executable_path?: string | null
+}
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 function readPayload(payload: unknown): Required<Pick<ServerJobPayload, 'server_id' | 'installPath'>> & ServerJobPayload {
@@ -80,11 +85,27 @@ async function isProcessRunning(pid: number) {
   return result.ok
 }
 
+async function find7dtdPid(installPath: string) {
+  const result = await runCommand('pgrep', ['-f', `${installPath}.+7DaysToDieServer`])
+  if (!result.ok) return null
+  const pid = Number(result.stdout.trim().split(/\s+/)[0])
+  return Number.isFinite(pid) && pid > 0 ? pid : null
+}
+
+async function getTail(filePath: string, lines = 40) {
+  try {
+    const result = await runCommand('tail', ['-n', String(lines), filePath])
+    return result.stdout || result.stderr || ''
+  } catch {
+    return ''
+  }
+}
+
 async function stopPid(pid: number) {
   await runCommand('kill', [String(pid)])
 
   for (let i = 0; i < 12; i++) {
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    await sleep(1000)
     if (!(await isProcessRunning(pid))) return true
   }
 
@@ -99,56 +120,84 @@ export async function refreshServerStatus(payload: unknown, ctx?: JobContext) {
 
   await ctx?.reportProgress({ progress: 35, message: 'Checking server process', serverId: input.server_id })
 
-  const pid = await readPid(pidFile)
-  if (!pid) {
-    await fs.rm(pidFile, { force: true })
-    return { message: 'Server is stopped', serverId: input.server_id, status: 'stopped', pid: null }
+  let pid = await readPid(pidFile)
+  if (pid && await isProcessRunning(pid)) {
+    await ctx?.reportProgress({ progress: 100, message: 'Server is running', serverId: input.server_id, pid })
+    return { message: 'Server is running', serverId: input.server_id, status: 'running', pid }
   }
 
-  const running = await isProcessRunning(pid)
-  if (!running) {
-    await fs.rm(pidFile, { force: true })
-    return { message: 'Server process is not running', serverId: input.server_id, status: 'stopped', pid: null }
+  pid = await find7dtdPid(installPath)
+  if (pid) {
+    await fs.writeFile(pidFile, String(pid), 'utf8')
+    await ctx?.reportProgress({ progress: 100, message: 'Server is running', serverId: input.server_id, pid })
+    return { message: 'Server is running', serverId: input.server_id, status: 'running', pid }
   }
 
-  await ctx?.reportProgress({ progress: 100, message: 'Server is running', serverId: input.server_id, pid })
-  return { message: 'Server is running', serverId: input.server_id, status: 'running', pid }
+  await fs.rm(pidFile, { force: true })
+  return { message: 'Server process is not running', serverId: input.server_id, status: 'stopped', pid: null }
 }
 
 export async function startServer(payload: unknown, ctx?: JobContext) {
   const input = readPayload(payload)
   const installPath = resolveInstallPath(input.installPath)
   const pidFile = path.join(installPath, '.apexgsp.pid')
-  const logFile = path.join(installPath, 'Logs', 'server.log')
+  const logDir = path.join(installPath, 'Logs')
+  const logFile = path.join(logDir, 'apexgsp-server.log')
 
   await ctx?.reportProgress({ progress: 10, message: 'Preparing to start server', serverId: input.server_id })
 
-  const existingPid = await readPid(pidFile)
-  if (existingPid && await isProcessRunning(existingPid)) {
-    await ctx?.reportProgress({ progress: 100, message: 'Server is already running', serverId: input.server_id, pid: existingPid })
-    return { message: 'Server is already running', serverId: input.server_id, status: 'running', pid: existingPid }
+  const currentStatus = await refreshServerStatus(payload)
+  if (currentStatus.status === 'running') {
+    await ctx?.reportProgress({ progress: 100, message: 'Server is already running', serverId: input.server_id, pid: currentStatus.pid })
+    return currentStatus
   }
 
   const executable = await findExecutable(installPath, input.executablePath || input.executable_path)
   if (!executable) throw new Error(`Server executable not found in ${installPath}`)
 
-  await fs.mkdir(path.join(installPath, 'Logs'), { recursive: true })
-  const logHandle = await fs.open(logFile, 'a')
+  await fs.mkdir(logDir, { recursive: true })
 
-  await ctx?.reportProgress({ progress: 40, message: 'Starting server process', serverId: input.server_id })
+  await ctx?.reportProgress({ progress: 35, message: 'Starting server process', serverId: input.server_id })
 
-  const child = spawn(executable, ['-quit', '-batchmode', '-nographics', '-dedicated'], {
+  const out = fsSync.openSync(logFile, 'a')
+  const err = fsSync.openSync(logFile, 'a')
+
+  const child = spawn(executable, ['-quit', '-batchmode', '-nographics', '-configfile=serverconfig.xml'], {
     cwd: installPath,
     detached: true,
-    stdio: ['ignore', logHandle.fd, logHandle.fd],
+    stdio: ['ignore', out, err],
+    env: {
+      ...process.env,
+      LD_LIBRARY_PATH: installPath,
+    },
   })
 
   child.unref()
-  await fs.writeFile(pidFile, String(child.pid ?? ''), 'utf8')
-  await logHandle.close()
+  fsSync.closeSync(out)
+  fsSync.closeSync(err)
 
-  await ctx?.reportProgress({ progress: 100, message: 'Server start requested', serverId: input.server_id, pid: child.pid })
-  return { message: 'Server start requested', serverId: input.server_id, status: 'running', pid: child.pid, logFile }
+  if (!child.pid) throw new Error('Failed to obtain server PID')
+
+  await fs.writeFile(pidFile, String(child.pid), 'utf8')
+  await ctx?.reportProgress({ progress: 60, message: 'Waiting for server process to remain alive', serverId: input.server_id, pid: child.pid })
+
+  await sleep(8000)
+
+  let runningPid = child.pid
+  if (!(await isProcessRunning(runningPid))) {
+    const discovered = await find7dtdPid(installPath)
+    if (discovered) runningPid = discovered
+  }
+
+  if (!(await isProcessRunning(runningPid))) {
+    await fs.rm(pidFile, { force: true })
+    const logTail = await getTail(logFile)
+    return { message: 'Server failed to stay running', serverId: input.server_id, status: 'error', pid: null, logFile, logTail }
+  }
+
+  await fs.writeFile(pidFile, String(runningPid), 'utf8')
+  await ctx?.reportProgress({ progress: 100, message: 'Server is running', serverId: input.server_id, pid: runningPid })
+  return { message: 'Server is running', serverId: input.server_id, status: 'running', pid: runningPid, logFile }
 }
 
 export async function stopServer(payload: unknown, ctx?: JobContext) {
@@ -158,7 +207,9 @@ export async function stopServer(payload: unknown, ctx?: JobContext) {
 
   await ctx?.reportProgress({ progress: 20, message: 'Stopping server', serverId: input.server_id })
 
-  const pid = await readPid(pidFile)
+  let pid = await readPid(pidFile)
+  if (!pid || !(await isProcessRunning(pid))) pid = await find7dtdPid(installPath)
+
   if (!pid || !(await isProcessRunning(pid))) {
     await fs.rm(pidFile, { force: true })
     await ctx?.reportProgress({ progress: 100, message: 'Server is already stopped', serverId: input.server_id })
