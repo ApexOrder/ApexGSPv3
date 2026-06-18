@@ -38,7 +38,7 @@ export interface Node {
   updated_at: string
 }
 
-export type GameServerStatus = 'installing' | 'stopped' | 'starting' | 'running' | 'stopping' | 'error'
+export type GameServerStatus = 'installing' | 'stopped' | 'starting' | 'running' | 'stopping' | 'error' | string
 
 export interface GameServer {
   id: string
