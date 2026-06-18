@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Gamepad2, Plus, RefreshCw, Play, Square, RotateCw } from 'lucide-react'
+import { Gamepad2, Plus, RefreshCw, Play, Square, RotateCw, ExternalLink } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { cn, timeAgo } from '@/lib/utils'
@@ -209,13 +209,16 @@ export default function Servers() {
             return (
               <div key={server.id} className="bg-slate-900 border border-slate-800 rounded-xl p-5 hover:border-slate-700 transition-colors">
                 <div className="flex items-start gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
+                  <Link to={`/servers/${server.id}`} className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0 hover:border-brand-500/40 transition-colors">
                     <Gamepad2 className="w-5 h-5 text-slate-400" />
-                  </div>
+                  </Link>
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-3 mb-1">
-                      <h3 className="text-slate-100 font-semibold text-sm truncate">{server.name}</h3>
+                      <Link to={`/servers/${server.id}`} className="text-slate-100 hover:text-brand-300 font-semibold text-sm truncate inline-flex items-center gap-1.5 transition-colors">
+                        {server.name}
+                        <ExternalLink className="w-3 h-3 text-slate-600" />
+                      </Link>
                       <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border capitalize', statusClass[server.status] ?? statusClass.stopped)}>
                         {server.status}
                       </span>
