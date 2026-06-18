@@ -193,9 +193,7 @@ export default function ServerDetails() {
         <div>
           <div className="flex items-center gap-3 mb-2">
             <h1 className="text-2xl font-bold text-slate-100 tracking-tight">{server.name}</h1>
-            <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border capitalize', statusClass[server.status] ?? statusClass.stopped)}>
-              {server.status}
-            </span>
+            <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border capitalize', statusClass[server.status] ?? statusClass.stopped)}>{server.status}</span>
           </div>
           <p className="text-slate-400 text-sm">7 Days To Die on {server.nodes?.name ?? 'Unknown node'}</p>
         </div>
@@ -227,54 +225,21 @@ export default function ServerDetails() {
             <span className={cn('text-[11px] px-2 py-0.5 rounded-full border capitalize', jobStatusClass[latestJob.status])}>{latestJob.status}</span>
           </div>
           <p className="text-xs text-slate-500 mt-1 font-mono truncate">{getJobMessage(latestJob)}</p>
-          {(progress !== null || jobBusy) && (
-            <div className="mt-3 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-              <div className="h-full rounded-full bg-brand-500 transition-all duration-500" style={{ width: `${progress ?? (latestJob.status === 'pending' ? 12 : 50)}%` }} />
-            </div>
-          )}
+          {(progress !== null || jobBusy) && <div className="mt-3 h-1.5 bg-slate-800 rounded-full overflow-hidden"><div className="h-full rounded-full bg-brand-500 transition-all duration-500" style={{ width: `${progress ?? (latestJob.status === 'pending' ? 12 : 50)}%` }} /></div>}
         </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-          <p className="text-xs text-slate-500 mb-1">Node</p>
-          <p className="text-sm text-slate-200 font-medium">{server.nodes?.name ?? 'Unknown'}</p>
-          <p className="text-xs text-slate-500 mt-1 capitalize">{server.nodes?.status ?? 'unknown'}</p>
-        </div>
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-          <p className="text-xs text-slate-500 mb-1">Install path</p>
-          <p className="text-xs text-slate-300 font-mono truncate">{server.install_path}</p>
-        </div>
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-          <p className="text-xs text-slate-500 mb-1">Created</p>
-          <p className="text-sm text-slate-200 font-medium">{timeAgo(server.created_at)}</p>
-        </div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4"><p className="text-xs text-slate-500 mb-1">Node</p><p className="text-sm text-slate-200 font-medium">{server.nodes?.name ?? 'Unknown'}</p><p className="text-xs text-slate-500 mt-1 capitalize">{server.nodes?.status ?? 'unknown'}</p></div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4"><p className="text-xs text-slate-500 mb-1">Install path</p><p className="text-xs text-slate-300 font-mono truncate">{server.install_path}</p></div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4"><p className="text-xs text-slate-500 mb-1">Created</p><p className="text-sm text-slate-200 font-medium">{timeAgo(server.created_at)}</p></div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <Link to={`/servers/${server.id}/console`} className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-brand-500/40 transition-colors">
-          <Terminal className="w-5 h-5 text-brand-400 mb-3" />
-          <p className="text-sm text-slate-200 font-semibold">Console</p>
-          <p className="text-xs text-slate-500 mt-1">View server output logs</p>
-          <p className="text-[11px] text-brand-400 mt-3">Open console</p>
-        </Link>
-        <Link to={`/servers/${server.id}/settings`} className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-brand-500/40 transition-colors">
-          <Settings className="w-5 h-5 text-brand-400 mb-3" />
-          <p className="text-sm text-slate-200 font-semibold">Settings</p>
-          <p className="text-xs text-slate-500 mt-1">Edit server configuration</p>
-          <p className="text-[11px] text-brand-400 mt-3">Open settings</p>
-        </Link>
-        {[
-          { label: 'Files', icon: Folder, description: 'Browse config and data' },
-          { label: 'Backups', icon: Archive, description: 'Create and restore backups' },
-        ].map(({ label, icon: Icon, description }) => (
-          <div key={label} className="bg-slate-900 border border-slate-800 rounded-xl p-4 opacity-60">
-            <Icon className="w-5 h-5 text-brand-400 mb-3" />
-            <p className="text-sm text-slate-200 font-semibold">{label}</p>
-            <p className="text-xs text-slate-500 mt-1">{description}</p>
-            <p className="text-[11px] text-slate-600 mt-3">Coming next</p>
-          </div>
-        ))}
+        <Link to={`/servers/${server.id}/console`} className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-brand-500/40 transition-colors"><Terminal className="w-5 h-5 text-brand-400 mb-3" /><p className="text-sm text-slate-200 font-semibold">Console</p><p className="text-xs text-slate-500 mt-1">View server output logs</p><p className="text-[11px] text-brand-400 mt-3">Open console</p></Link>
+        <Link to={`/servers/${server.id}/files`} className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-brand-500/40 transition-colors"><Folder className="w-5 h-5 text-brand-400 mb-3" /><p className="text-sm text-slate-200 font-semibold">Files</p><p className="text-xs text-slate-500 mt-1">Browse and edit server files</p><p className="text-[11px] text-brand-400 mt-3">Open files</p></Link>
+        <Link to={`/servers/${server.id}/settings`} className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-brand-500/40 transition-colors"><Settings className="w-5 h-5 text-brand-400 mb-3" /><p className="text-sm text-slate-200 font-semibold">Settings</p><p className="text-xs text-slate-500 mt-1">Edit server configuration</p><p className="text-[11px] text-brand-400 mt-3">Open settings</p></Link>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 opacity-60"><Archive className="w-5 h-5 text-brand-400 mb-3" /><p className="text-sm text-slate-200 font-semibold">Backups</p><p className="text-xs text-slate-500 mt-1">Create and restore backups</p><p className="text-[11px] text-slate-600 mt-3">Coming next</p></div>
       </div>
     </div>
   )
