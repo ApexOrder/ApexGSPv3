@@ -3,6 +3,7 @@ import { detectTools } from './detectTools.js'
 import { installSteamcmd } from './installSteamcmd.js'
 import { createServer } from './createServer.js'
 import { updateServerConfig } from './config.js'
+import { createFolder, deletePath, listFiles, readFile, writeFile } from './fileManager.js'
 import { refreshServerStatus, restartServer, startServer, stopServer } from './manageServer.js'
 import { getServerLogs } from './serverConsole.js'
 
@@ -22,6 +23,16 @@ export async function runJob(type: string, payload: unknown, ctx?: JobContext) {
       return createServer(payload, ctx)
     case 'update_server_config':
       return updateServerConfig(payload, ctx)
+    case 'list_files':
+      return listFiles(payload, ctx)
+    case 'read_file':
+      return readFile(payload, ctx)
+    case 'write_file':
+      return writeFile(payload, ctx)
+    case 'create_folder':
+      return createFolder(payload, ctx)
+    case 'delete_path':
+      return deletePath(payload, ctx)
     case 'start_server':
       return startServer(payload, ctx)
     case 'stop_server':
