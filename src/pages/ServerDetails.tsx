@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Gamepad2, Play, RefreshCw, RotateCw, Square, Terminal, Folder, Archive, Settings } from 'lucide-react'
+import { ArrowLeft, Gamepad2, Play, RefreshCw, RotateCw, Square, Terminal, Folder, Archive, Settings, Activity } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { cn, timeAgo } from '@/lib/utils'
 import type { GameServer } from '@/lib/types'
 
-type JobAction = 'start_server' | 'stop_server' | 'restart_server'
+type JobAction = 'start_server' | 'stop_server' | 'restart_server' | 'refresh_server_status'
 type JobStatus = 'pending' | 'running' | 'completed' | 'failed'
 
 type ServerJob = {
@@ -98,7 +98,7 @@ export default function ServerDetails() {
       .from('jobs')
       .select('id, node_id, type, status, payload, result, error, created_at, updated_at')
       .eq('user_id', user.id)
-      .in('type', ['start_server', 'stop_server', 'restart_server'])
+      .in('type', ['start_server', 'stop_server', 'restart_server', 'refresh_server_status'])
       .order('created_at', { ascending: false })
       .limit(25)
 
@@ -202,6 +202,14 @@ export default function ServerDetails() {
 
         <div className="flex items-center gap-2 shrink-0">
           <button
+            onClick={() => queueServerJob('refresh_server_status')}
+            disabled={sendingId !== null || jobBusy}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {sendingId === `${server.id}:refresh_server_status` ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Activity className="w-3.5 h-3.5" />}
+            Refresh Status
+          </button>
+          <button
             onClick={() => queueServerJob('start_server')}
             disabled={server.status === 'running' || sendingId !== null || jobBusy}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-emerald-600/15 text-emerald-300 border border-emerald-500/20 hover:bg-emerald-600/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
@@ -264,17 +272,22 @@ export default function ServerDetails() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <Link to={`/servers/${server.id}/console`} className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-brand-500/40 transition-colors">
+          <Terminal className="w-5 h-5 text-brand-400 mb-3" />
+          <p className="text-sm text-slate-200 font-semibold">Console</p>
+          <p className="text-xs text-slate-500 mt-1">View server output logs</p>
+          <p className="text-[11px] text-brand-400 mt-3">Open console</p>
+        </Link>
         {[
-          { label: 'Console', icon: Terminal, description: 'Live output and commands', disabled: true },
-          { label: 'Files', icon: Folder, description: 'Browse config and data', disabled: true },
-          { label: 'Backups', icon: Archive, description: 'Create and restore backups', disabled: true },
-          { label: 'Settings', icon: Settings, description: 'Server configuration', disabled: true },
-        ].map(({ label, icon: Icon, description, disabled }) => (
-          <div key={label} className={cn('bg-slate-900 border border-slate-800 rounded-xl p-4', disabled && 'opacity-60')}>
+          { label: 'Files', icon: Folder, description: 'Browse config and data' },
+          { label: 'Backups', icon: Archive, description: 'Create and restore backups' },
+          { label: 'Settings', icon: Settings, description: 'Server configuration' },
+        ].map(({ label, icon: Icon, description }) => (
+          <div key={label} className="bg-slate-900 border border-slate-800 rounded-xl p-4 opacity-60">
             <Icon className="w-5 h-5 text-brand-400 mb-3" />
             <p className="text-sm text-slate-200 font-semibold">{label}</p>
             <p className="text-xs text-slate-500 mt-1">{description}</p>
-            {disabled && <p className="text-[11px] text-slate-600 mt-3">Coming next</p>}
+            <p className="text-[11px] text-slate-600 mt-3">Coming next</p>
           </div>
         ))}
       </div>
