@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, FileText, Folder, RefreshCw, Save, Trash2, FolderPlus } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
@@ -29,9 +29,16 @@ type ServerWithNode = GameServer & {
   nodes?: { name: string | null; status: string | null } | null
 }
 
+type SaveState = 'idle' | 'saving' | 'saved' | 'failed'
+
 function getServerId(job: FileJob) {
   const value = job.payload?.server_id ?? job.result?.serverId
   return typeof value === 'string' ? value : null
+}
+
+function getRelativePath(job: FileJob) {
+  const value = job.payload?.relativePath ?? job.result?.path
+  return typeof value === 'string' ? value : ''
 }
 
 function getEntries(job: FileJob | null) {
@@ -62,10 +69,14 @@ export default function ServerFiles() {
   const [selectedPath, setSelectedPath] = useState('')
   const [editorContent, setEditorContent] = useState('')
   const [busy, setBusy] = useState(false)
+  const [saveState, setSaveState] = useState<SaveState>('idle')
+  const lastAppliedReadJobId = useRef<string | null>(null)
+  const lastHandledWriteJobId = useRef<string | null>(null)
 
   const serverJobs = useMemo(() => jobs.filter(job => getServerId(job) === id), [jobs, id])
-  const latestListJob = serverJobs.find(job => job.type === 'list_files') ?? null
-  const latestReadJob = serverJobs.find(job => job.type === 'read_file' && job.result?.path === selectedPath) ?? null
+  const latestListJob = serverJobs.find(job => job.type === 'list_files' && getRelativePath(job) === currentPath) ?? null
+  const latestReadJob = serverJobs.find(job => job.type === 'read_file' && getRelativePath(job) === selectedPath) ?? null
+  const latestWriteJob = serverJobs.find(job => job.type === 'write_file' && getRelativePath(job) === selectedPath) ?? null
   const entries = getEntries(latestListJob)
 
   async function fetchServer() {
@@ -90,49 +101,59 @@ export default function ServerFiles() {
       .eq('user_id', user.id)
       .in('type', ['list_files', 'read_file', 'write_file', 'create_folder', 'delete_path'])
       .order('created_at', { ascending: false })
-      .limit(50)
+      .limit(80)
 
     if (error) console.error(error)
     setJobs((data ?? []) as FileJob[])
   }
 
   async function queueJob(type: FileJobType, relativePath = currentPath, content?: string) {
-    if (!user || !server) return
+    if (!user || !server) return null
     setBusy(true)
 
-    const { error } = await supabase.from('jobs').insert({
-      node_id: server.node_id,
-      user_id: user.id,
-      type,
-      status: 'pending',
-      payload: {
-        requested_at: new Date().toISOString(),
-        server_id: server.id,
-        installPath: server.install_path,
-        relativePath,
-        content,
-      },
-    })
+    const { data, error } = await supabase
+      .from('jobs')
+      .insert({
+        node_id: server.node_id,
+        user_id: user.id,
+        type,
+        status: 'pending',
+        payload: {
+          requested_at: new Date().toISOString(),
+          server_id: server.id,
+          installPath: server.install_path,
+          relativePath,
+          content,
+        },
+      })
+      .select('id')
+      .single()
 
     if (error) alert(error.message)
     await fetchJobs()
     setBusy(false)
+    return data?.id ?? null
   }
 
   async function openFolder(path: string) {
     setCurrentPath(path)
     setSelectedPath('')
     setEditorContent('')
+    setSaveState('idle')
     await queueJob('list_files', path)
   }
 
   async function openFile(path: string) {
     setSelectedPath(path)
+    setSaveState('idle')
+    lastAppliedReadJobId.current = null
     await queueJob('read_file', path)
   }
 
   async function saveFile() {
     if (!selectedPath) return
+    setSaveState('saving')
+    lastHandledWriteJobId.current = null
     await queueJob('write_file', selectedPath, editorContent)
   }
 
@@ -147,6 +168,11 @@ export default function ServerFiles() {
   async function deleteEntry(entry: FileEntry) {
     if (!confirm(`Delete ${entry.path}?`)) return
     await queueJob('delete_path', entry.path)
+    if (selectedPath === entry.path) {
+      setSelectedPath('')
+      setEditorContent('')
+      setSaveState('idle')
+    }
     await queueJob('list_files', currentPath)
   }
 
@@ -170,14 +196,37 @@ export default function ServerFiles() {
   }, [server])
 
   useEffect(() => {
-    const content = getFileContent(latestReadJob)
-    if (content || latestReadJob?.status === 'completed') setEditorContent(content)
-  }, [latestReadJob?.id])
+    if (!latestReadJob || latestReadJob.status !== 'completed') return
+    if (latestReadJob.id === lastAppliedReadJobId.current) return
+    if (saveState === 'saving') return
+
+    lastAppliedReadJobId.current = latestReadJob.id
+    setEditorContent(getFileContent(latestReadJob))
+  }, [latestReadJob?.id, latestReadJob?.status, saveState])
+
+  useEffect(() => {
+    if (!latestWriteJob) return
+    if (latestWriteJob.id === lastHandledWriteJobId.current) return
+
+    if (latestWriteJob.status === 'completed') {
+      lastHandledWriteJobId.current = latestWriteJob.id
+      setSaveState('saved')
+      queueJob('read_file', selectedPath)
+      queueJob('list_files', currentPath)
+      window.setTimeout(() => setSaveState('idle'), 1800)
+    }
+
+    if (latestWriteJob.status === 'failed') {
+      lastHandledWriteJobId.current = latestWriteJob.id
+      setSaveState('failed')
+    }
+  }, [latestWriteJob?.id, latestWriteJob?.status])
 
   if (loading) return <div className="p-8 text-slate-400">Loading files...</div>
   if (!server) return <div className="p-8 text-slate-400">Server not found.</div>
 
   const parentPath = currentPath.split('/').filter(Boolean).slice(0, -1).join('/')
+  const saveLabel = saveState === 'saving' ? 'Saving...' : saveState === 'saved' ? 'Saved' : saveState === 'failed' ? 'Failed' : 'Save'
 
   return (
     <div className="p-8 max-w-7xl mx-auto">
@@ -209,7 +258,7 @@ export default function ServerFiles() {
           </div>
           <div className="divide-y divide-slate-800">
             {entries.length === 0 ? (
-              <p className="p-4 text-sm text-slate-500">No files loaded yet. Click Refresh.</p>
+              <p className="p-4 text-sm text-slate-500">Loading or empty folder. Click Refresh if needed.</p>
             ) : entries.map(entry => (
               <div key={entry.path} className="flex items-center gap-3 px-4 py-3 hover:bg-slate-800/50">
                 {entry.type === 'directory' ? <Folder className="w-4 h-4 text-brand-400" /> : <FileText className="w-4 h-4 text-slate-400" />}
@@ -227,9 +276,14 @@ export default function ServerFiles() {
 
         <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
-            <p className="text-sm text-slate-200 font-semibold">Editor</p>
-            <button onClick={saveFile} disabled={!selectedPath || busy} className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 text-white hover:bg-brand-500 disabled:opacity-40">
-              <Save className="w-3.5 h-3.5" /> Save
+            <div>
+              <p className="text-sm text-slate-200 font-semibold">Editor</p>
+              {saveState === 'saved' && <p className="text-xs text-emerald-400 mt-0.5">Saved and refreshed</p>}
+              {saveState === 'failed' && <p className="text-xs text-red-400 mt-0.5">Save failed</p>}
+            </div>
+            <button onClick={saveFile} disabled={!selectedPath || busy || saveState === 'saving'} className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 text-white hover:bg-brand-500 disabled:opacity-40">
+              {saveState === 'saving' ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+              {saveLabel}
             </button>
           </div>
           <div className="px-4 py-2 border-b border-slate-800 text-xs text-slate-500 font-mono truncate">
@@ -237,7 +291,10 @@ export default function ServerFiles() {
           </div>
           <textarea
             value={editorContent}
-            onChange={event => setEditorContent(event.target.value)}
+            onChange={event => {
+              setEditorContent(event.target.value)
+              if (saveState !== 'saving') setSaveState('idle')
+            }}
             disabled={!selectedPath}
             className="w-full min-h-[34rem] bg-slate-950 text-slate-200 p-4 font-mono text-xs outline-none resize-none disabled:opacity-50"
             placeholder="Open a .xml, .json, .cfg, .ini or .txt file to edit it."
