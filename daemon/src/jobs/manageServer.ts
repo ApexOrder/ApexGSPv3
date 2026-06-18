@@ -92,6 +92,29 @@ async function stopPid(pid: number) {
   return !(await isProcessRunning(pid))
 }
 
+export async function refreshServerStatus(payload: unknown, ctx?: JobContext) {
+  const input = readPayload(payload)
+  const installPath = resolveInstallPath(input.installPath)
+  const pidFile = path.join(installPath, '.apexgsp.pid')
+
+  await ctx?.reportProgress({ progress: 35, message: 'Checking server process', serverId: input.server_id })
+
+  const pid = await readPid(pidFile)
+  if (!pid) {
+    await fs.rm(pidFile, { force: true })
+    return { message: 'Server is stopped', serverId: input.server_id, status: 'stopped', pid: null }
+  }
+
+  const running = await isProcessRunning(pid)
+  if (!running) {
+    await fs.rm(pidFile, { force: true })
+    return { message: 'Server process is not running', serverId: input.server_id, status: 'stopped', pid: null }
+  }
+
+  await ctx?.reportProgress({ progress: 100, message: 'Server is running', serverId: input.server_id, pid })
+  return { message: 'Server is running', serverId: input.server_id, status: 'running', pid }
+}
+
 export async function startServer(payload: unknown, ctx?: JobContext) {
   const input = readPayload(payload)
   const installPath = resolveInstallPath(input.installPath)
