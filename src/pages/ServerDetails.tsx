@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Gamepad2, Play, RefreshCw, RotateCw, Square, Terminal, Folder, Archive, Settings, Activity } from 'lucide-react'
+import { ArrowLeft, Play, RefreshCw, RotateCw, Square, Terminal, Folder, Archive, Settings, Activity } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { cn, timeAgo } from '@/lib/utils'
@@ -201,35 +201,19 @@ export default function ServerDetails() {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={() => queueServerJob('refresh_server_status')}
-            disabled={sendingId !== null || jobBusy}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
+          <button onClick={() => queueServerJob('refresh_server_status')} disabled={sendingId !== null || jobBusy} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
             {sendingId === `${server.id}:refresh_server_status` ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Activity className="w-3.5 h-3.5" />}
             Refresh Status
           </button>
-          <button
-            onClick={() => queueServerJob('start_server')}
-            disabled={server.status === 'running' || sendingId !== null || jobBusy}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-emerald-600/15 text-emerald-300 border border-emerald-500/20 hover:bg-emerald-600/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
+          <button onClick={() => queueServerJob('start_server')} disabled={server.status === 'running' || sendingId !== null || jobBusy} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-emerald-600/15 text-emerald-300 border border-emerald-500/20 hover:bg-emerald-600/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
             {sendingId === `${server.id}:start_server` ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
             Start
           </button>
-          <button
-            onClick={() => queueServerJob('restart_server')}
-            disabled={sendingId !== null || jobBusy}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-blue-600/15 text-blue-300 border border-blue-500/20 hover:bg-blue-600/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
+          <button onClick={() => queueServerJob('restart_server')} disabled={sendingId !== null || jobBusy} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-blue-600/15 text-blue-300 border border-blue-500/20 hover:bg-blue-600/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
             {sendingId === `${server.id}:restart_server` ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RotateCw className="w-3.5 h-3.5" />}
             Restart
           </button>
-          <button
-            onClick={() => queueServerJob('stop_server')}
-            disabled={server.status === 'stopped' || sendingId !== null || jobBusy}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-red-600/15 text-red-300 border border-red-500/20 hover:bg-red-600/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
+          <button onClick={() => queueServerJob('stop_server')} disabled={server.status === 'stopped' || sendingId !== null || jobBusy} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-red-600/15 text-red-300 border border-red-500/20 hover:bg-red-600/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
             {sendingId === `${server.id}:stop_server` ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Square className="w-3.5 h-3.5" />}
             Stop
           </button>
@@ -239,12 +223,8 @@ export default function ServerDetails() {
       {latestJob && (
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 mb-6">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-xs text-slate-400">
-              Latest job: <span className="text-slate-200 font-mono">{latestJob.type}</span>
-            </p>
-            <span className={cn('text-[11px] px-2 py-0.5 rounded-full border capitalize', jobStatusClass[latestJob.status])}>
-              {latestJob.status}
-            </span>
+            <p className="text-xs text-slate-400">Latest job: <span className="text-slate-200 font-mono">{latestJob.type}</span></p>
+            <span className={cn('text-[11px] px-2 py-0.5 rounded-full border capitalize', jobStatusClass[latestJob.status])}>{latestJob.status}</span>
           </div>
           <p className="text-xs text-slate-500 mt-1 font-mono truncate">{getJobMessage(latestJob)}</p>
           {(progress !== null || jobBusy) && (
@@ -278,10 +258,15 @@ export default function ServerDetails() {
           <p className="text-xs text-slate-500 mt-1">View server output logs</p>
           <p className="text-[11px] text-brand-400 mt-3">Open console</p>
         </Link>
+        <Link to={`/servers/${server.id}/settings`} className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-brand-500/40 transition-colors">
+          <Settings className="w-5 h-5 text-brand-400 mb-3" />
+          <p className="text-sm text-slate-200 font-semibold">Settings</p>
+          <p className="text-xs text-slate-500 mt-1">Edit server configuration</p>
+          <p className="text-[11px] text-brand-400 mt-3">Open settings</p>
+        </Link>
         {[
           { label: 'Files', icon: Folder, description: 'Browse config and data' },
           { label: 'Backups', icon: Archive, description: 'Create and restore backups' },
-          { label: 'Settings', icon: Settings, description: 'Server configuration' },
         ].map(({ label, icon: Icon, description }) => (
           <div key={label} className="bg-slate-900 border border-slate-800 rounded-xl p-4 opacity-60">
             <Icon className="w-5 h-5 text-brand-400 mb-3" />
