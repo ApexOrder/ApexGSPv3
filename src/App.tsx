@@ -11,6 +11,7 @@ import Servers from '@/pages/Servers'
 import NewServer from '@/pages/NewServer'
 import ServerDetails from '@/pages/ServerDetails'
 import ServerConsole from '@/pages/ServerConsole'
+import ServerSettings from '@/pages/ServerSettings'
 import Profile from '@/pages/Profile'
 import Settings from '@/pages/Settings'
 
@@ -21,13 +22,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Login />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
-          <Route
-            element={
-              <ProtectedRoute>
-                <Layout />
-              </ProtectedRoute>
-            }
-          >
+          <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/nodes" element={<Nodes />} />
             <Route path="/nodes/add" element={<AddNode />} />
@@ -35,6 +30,7 @@ export default function App() {
             <Route path="/servers/new" element={<NewServer />} />
             <Route path="/servers/:id" element={<ServerDetails />} />
             <Route path="/servers/:id/console" element={<ServerConsole />} />
+            <Route path="/servers/:id/settings" element={<ServerSettings />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/settings" element={<Settings />} />
           </Route>
