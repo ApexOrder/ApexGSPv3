@@ -3,6 +3,7 @@ import { URL } from 'node:url'
 import type { DaemonConfig } from './config.js'
 import { refreshServerStatus, restartServer, startServer, stopServer } from './jobs/manageServer.js'
 import { getServerLogs } from './jobs/serverConsole.js'
+import { getServerMetrics } from './jobs/serverMetrics.js'
 
 type ApiHandler = (payload: Record<string, unknown>) => Promise<unknown>
 
@@ -74,6 +75,7 @@ export function startHttpApi(config: DaemonConfig, log: (message: string) => voi
       '/api/server/stop': payload => stopServer(payload),
       '/api/server/restart': payload => restartServer(payload),
       '/api/server/logs': payload => getServerLogs(payload),
+      '/api/server/metrics': payload => getServerMetrics(payload),
     }
 
     const handler = routes[url.pathname]
