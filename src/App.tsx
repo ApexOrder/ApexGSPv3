@@ -10,6 +10,7 @@ import AddNode from '@/pages/AddNode'
 import Servers from '@/pages/Servers'
 import NewServer from '@/pages/NewServer'
 import ServerDetails from '@/pages/ServerDetails'
+import ServerBackups from '@/pages/ServerBackups'
 import ServerConsole from '@/pages/ServerConsole'
 import ServerFiles from '@/pages/ServerFiles'
 import ServerSettings from '@/pages/ServerSettings'
@@ -30,6 +31,7 @@ export default function App() {
             <Route path="/servers" element={<Servers />} />
             <Route path="/servers/new" element={<NewServer />} />
             <Route path="/servers/:id" element={<ServerDetails />} />
+            <Route path="/servers/:id/backups" element={<ServerBackups />} />
             <Route path="/servers/:id/console" element={<ServerConsole />} />
             <Route path="/servers/:id/files" element={<ServerFiles />} />
             <Route path="/servers/:id/settings" element={<ServerSettings />} />
