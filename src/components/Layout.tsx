@@ -1,11 +1,12 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, Server, User, Settings, LogOut, Activity, ChevronRight } from 'lucide-react'
+import { LayoutDashboard, Server, User, Settings, LogOut, Activity, ChevronRight, Gamepad2 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { cn } from '@/lib/utils'
 
 const navItems = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/nodes', label: 'Nodes', icon: Server },
+  { to: '/servers', label: 'Servers', icon: Gamepad2 },
   { to: '/profile', label: 'Profile', icon: User },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
