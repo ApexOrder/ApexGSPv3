@@ -1,33 +1,21 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Play, RefreshCw, RotateCw, Square, Terminal, Folder, Archive, Settings, Activity } from 'lucide-react'
+import { callNodeApi } from '@/lib/nodeApi'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { cn, timeAgo } from '@/lib/utils'
 import type { GameServer } from '@/lib/types'
 
-type JobAction = 'start_server' | 'stop_server' | 'restart_server' | 'refresh_server_status'
-type JobStatus = 'pending' | 'running' | 'completed' | 'failed'
-
-type ServerJob = {
-  id: string
-  node_id: string
-  type: string
-  status: JobStatus
-  payload: Record<string, unknown> | null
-  result: Record<string, unknown> | null
-  error: string | null
-  created_at: string
-  updated_at: string
+type ServerWithNode = GameServer & {
+  nodes?: { name: string | null; status: string | null; hostname: string | null; ip_address: string | null } | null
 }
 
-type ServerWithNode = GameServer & {
-  nodes?: {
-    name: string | null
-    status: string | null
-    hostname: string | null
-    ip_address: string | null
-  } | null
+type DirectResult = {
+  message?: string
+  serverId?: string
+  status?: string
+  pid?: number | null
 }
 
 const statusClass: Record<string, string> = {
@@ -39,42 +27,14 @@ const statusClass: Record<string, string> = {
   error: 'bg-red-500/10 text-red-400 border-red-500/20',
 }
 
-const jobStatusClass: Record<JobStatus, string> = {
-  completed: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-  failed: 'bg-red-500/10 text-red-400 border-red-500/20',
-  running: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  pending: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-}
-
-function getServerIdFromJob(job: ServerJob) {
-  const value = job.payload?.server_id ?? job.result?.serverId
-  return typeof value === 'string' ? value : null
-}
-
-function getJobMessage(job: ServerJob) {
-  const resultMessage = job.result?.message
-  if (typeof resultMessage === 'string') return resultMessage
-  if (job.error) return job.error
-  return job.status === 'pending' ? 'Queued and waiting for daemon' : 'Processing job'
-}
-
-function getJobProgress(job: ServerJob) {
-  const progress = job.result?.progress
-  return typeof progress === 'number' ? Math.min(100, Math.max(0, progress)) : null
-}
-
 export default function ServerDetails() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, session } = useAuth()
   const [server, setServer] = useState<ServerWithNode | null>(null)
-  const [jobs, setJobs] = useState<ServerJob[]>([])
   const [loading, setLoading] = useState(true)
-  const [sendingId, setSendingId] = useState<string | null>(null)
-
-  const latestJob = useMemo(() => jobs.find(job => getServerIdFromJob(job) === id) ?? null, [jobs, id])
-  const jobBusy = latestJob?.status === 'pending' || latestJob?.status === 'running'
-  const progress = latestJob ? getJobProgress(latestJob) : null
+  const [action, setAction] = useState<string | null>(null)
+  const [message, setMessage] = useState('')
 
   async function fetchServer() {
     if (!user || !id) return
@@ -91,89 +51,44 @@ export default function ServerDetails() {
     setLoading(false)
   }
 
-  async function fetchJobs() {
-    if (!user) return
-
-    const { data, error } = await supabase
-      .from('jobs')
-      .select('id, node_id, type, status, payload, result, error, created_at, updated_at')
-      .eq('user_id', user.id)
-      .in('type', ['start_server', 'stop_server', 'restart_server', 'refresh_server_status'])
-      .order('created_at', { ascending: false })
-      .limit(25)
-
-    if (error) {
-      console.error(error)
-      return
-    }
-
-    setJobs((data ?? []) as ServerJob[])
-  }
-
-  async function refreshAll() {
-    await Promise.all([fetchServer(), fetchJobs()])
-  }
-
   useEffect(() => {
-    refreshAll()
-    if (!user) return
-
-    const serverChannel = supabase
-      .channel(`server-details-${id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'servers', filter: `user_id=eq.${user.id}` }, refreshAll)
-      .subscribe()
-
-    const jobChannel = supabase
-      .channel(`server-details-jobs-${id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs', filter: `user_id=eq.${user.id}` }, fetchJobs)
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(serverChannel)
-      supabase.removeChannel(jobChannel)
-    }
+    fetchServer()
   }, [user, id])
 
-  async function queueServerJob(type: JobAction) {
-    if (!user || !server) return
+  async function runDirect(nextAction: 'status' | 'start' | 'stop' | 'restart') {
+    if (!server) return
 
-    setSendingId(`${server.id}:${type}`)
+    setAction(nextAction)
+    setMessage(`${nextAction} requested...`)
 
-    const { error } = await supabase.from('jobs').insert({
-      node_id: server.node_id,
-      user_id: user.id,
-      type,
-      status: 'pending',
-      payload: {
-        requested_at: new Date().toISOString(),
+    try {
+      const result = await callNodeApi<DirectResult>(session, nextAction, {
         server_id: server.id,
-        name: server.name,
-        slug: server.slug,
-        game: server.game,
         installPath: server.install_path,
         executablePath: server.executable_path,
-      },
-    })
+      })
 
-    if (error) alert(error.message)
-    await fetchJobs()
-    setSendingId(null)
+      const nextStatus = result.status
+      if (nextStatus) {
+        setServer(prev => prev ? { ...prev, status: nextStatus } : prev)
+        await supabase.from('servers').update({ status: nextStatus, updated_at: new Date().toISOString() }).eq('id', server.id).eq('user_id', user?.id)
+      }
+
+      setMessage(result.message || `${nextAction} completed`)
+    } catch (error) {
+      setMessage((error as Error).message)
+    } finally {
+      setAction(null)
+    }
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-full py-20">
-        <div className="inline-block w-6 h-6 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    )
-  }
+  if (loading) return <div className="p-8 text-slate-400">Loading server...</div>
 
   if (!server) {
     return (
       <div className="p-8 max-w-4xl mx-auto">
         <button onClick={() => navigate('/servers')} className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-200 mb-8 transition-colors">
-          <ArrowLeft className="w-4 h-4" />
-          Back to servers
+          <ArrowLeft className="w-4 h-4" /> Back to servers
         </button>
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-10 text-center">
           <p className="text-slate-300 font-semibold">Server not found</p>
@@ -182,11 +97,12 @@ export default function ServerDetails() {
     )
   }
 
+  const busy = action !== null
+
   return (
     <div className="p-8 max-w-6xl mx-auto">
       <button onClick={() => navigate('/servers')} className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-200 mb-8 transition-colors">
-        <ArrowLeft className="w-4 h-4" />
-        Back to servers
+        <ArrowLeft className="w-4 h-4" /> Back to servers
       </button>
 
       <div className="flex items-start justify-between gap-6 mb-8">
@@ -199,33 +115,24 @@ export default function ServerDetails() {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          <button onClick={() => queueServerJob('refresh_server_status')} disabled={sendingId !== null || jobBusy} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-            {sendingId === `${server.id}:refresh_server_status` ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Activity className="w-3.5 h-3.5" />}
-            Refresh Status
+          <button onClick={() => runDirect('status')} disabled={busy} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            {action === 'status' ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Activity className="w-3.5 h-3.5" />} Refresh Status
           </button>
-          <button onClick={() => queueServerJob('start_server')} disabled={server.status === 'running' || sendingId !== null || jobBusy} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-emerald-600/15 text-emerald-300 border border-emerald-500/20 hover:bg-emerald-600/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-            {sendingId === `${server.id}:start_server` ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-            Start
+          <button onClick={() => runDirect('start')} disabled={server.status === 'running' || busy} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-emerald-600/15 text-emerald-300 border border-emerald-500/20 hover:bg-emerald-600/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            {action === 'start' ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />} Start
           </button>
-          <button onClick={() => queueServerJob('restart_server')} disabled={sendingId !== null || jobBusy} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-blue-600/15 text-blue-300 border border-blue-500/20 hover:bg-blue-600/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-            {sendingId === `${server.id}:restart_server` ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RotateCw className="w-3.5 h-3.5" />}
-            Restart
+          <button onClick={() => runDirect('restart')} disabled={busy} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-blue-600/15 text-blue-300 border border-blue-500/20 hover:bg-blue-600/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            {action === 'restart' ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RotateCw className="w-3.5 h-3.5" />} Restart
           </button>
-          <button onClick={() => queueServerJob('stop_server')} disabled={server.status === 'stopped' || sendingId !== null || jobBusy} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-red-600/15 text-red-300 border border-red-500/20 hover:bg-red-600/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-            {sendingId === `${server.id}:stop_server` ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Square className="w-3.5 h-3.5" />}
-            Stop
+          <button onClick={() => runDirect('stop')} disabled={server.status === 'stopped' || busy} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-red-600/15 text-red-300 border border-red-500/20 hover:bg-red-600/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            {action === 'stop' ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Square className="w-3.5 h-3.5" />} Stop
           </button>
         </div>
       </div>
 
-      {latestJob && (
+      {message && (
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 mb-6">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-xs text-slate-400">Latest job: <span className="text-slate-200 font-mono">{latestJob.type}</span></p>
-            <span className={cn('text-[11px] px-2 py-0.5 rounded-full border capitalize', jobStatusClass[latestJob.status])}>{latestJob.status}</span>
-          </div>
-          <p className="text-xs text-slate-500 mt-1 font-mono truncate">{getJobMessage(latestJob)}</p>
-          {(progress !== null || jobBusy) && <div className="mt-3 h-1.5 bg-slate-800 rounded-full overflow-hidden"><div className="h-full rounded-full bg-brand-500 transition-all duration-500" style={{ width: `${progress ?? (latestJob.status === 'pending' ? 12 : 50)}%` }} /></div>}
+          <p className="text-xs text-slate-400">Direct API: <span className="text-slate-200 font-mono">{message}</span></p>
         </div>
       )}
 
