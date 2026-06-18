@@ -3,6 +3,7 @@ import { detectTools } from './detectTools.js'
 import { installSteamcmd } from './installSteamcmd.js'
 import { createServer } from './createServer.js'
 import { restartServer, startServer, stopServer } from './manageServer.js'
+import { getServerLogs } from './serverConsole.js'
 
 export interface JobContext {
   reportProgress: (result: Record<string, unknown>) => Promise<void>
@@ -24,6 +25,8 @@ export async function runJob(type: string, payload: unknown, ctx?: JobContext) {
       return stopServer(payload, ctx)
     case 'restart_server':
       return restartServer(payload, ctx)
+    case 'get_server_logs':
+      return getServerLogs(payload, ctx)
     default:
       throw new Error(`Unsupported job type: ${type}`)
   }
