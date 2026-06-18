@@ -9,6 +9,7 @@ import Nodes from '@/pages/Nodes'
 import AddNode from '@/pages/AddNode'
 import Servers from '@/pages/Servers'
 import NewServer from '@/pages/NewServer'
+import ServerDetails from '@/pages/ServerDetails'
 import Profile from '@/pages/Profile'
 import Settings from '@/pages/Settings'
 
@@ -31,6 +32,7 @@ export default function App() {
             <Route path="/nodes/add" element={<AddNode />} />
             <Route path="/servers" element={<Servers />} />
             <Route path="/servers/new" element={<NewServer />} />
+            <Route path="/servers/:id" element={<ServerDetails />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/settings" element={<Settings />} />
           </Route>
