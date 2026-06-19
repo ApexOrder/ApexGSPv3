@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Play, RefreshCw, RotateCw, Square, Terminal, Folder, Archive, Settings, Activity, Cpu, HardDrive, MemoryStick, Clock } from 'lucide-react'
 import { callNodeApi } from '@/lib/nodeApi'
@@ -65,9 +65,17 @@ export default function ServerDetails() {
   const [loading, setLoading] = useState(true)
   const [action, setAction] = useState<string | null>(null)
   const [message, setMessage] = useState('')
+  const [lastLiveUpdate, setLastLiveUpdate] = useState<string | null>(null)
+  const serverRef = useRef<ServerWithNode | null>(null)
+  const fetchingLiveRef = useRef(false)
 
-  async function fetchServer() {
-    if (!user || !id) return
+  function applyServer(next: ServerWithNode | null) {
+    serverRef.current = next
+    setServer(next)
+  }
+
+  async function fetchServer(silent = false) {
+    if (!user || !id) return null
 
     const { data, error } = await supabase
       .from('servers')
@@ -76,24 +84,60 @@ export default function ServerDetails() {
       .eq('id', id)
       .maybeSingle()
 
-    if (error) console.error(error)
-    setServer((data ?? null) as ServerWithNode | null)
+    if (error) {
+      console.error(error)
+      if (!silent) setMessage(error.message)
+      return null
+    }
+
+    const next = (data ?? null) as ServerWithNode | null
+    applyServer(next)
     setLoading(false)
+    return next
   }
 
-  async function fetchMetrics(targetServer = server) {
-    if (!targetServer) return
+  async function syncStatusToDatabase(serverId: string, status: string) {
+    if (!user) return
+    await supabase
+      .from('servers')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', serverId)
+      .eq('user_id', user.id)
+  }
+
+  async function fetchMetrics(targetServer = serverRef.current) {
+    if (!targetServer) return null
     try {
       const result = await callNodeApi<ServerMetrics>(session, 'metrics', {
         server_id: targetServer.id,
         installPath: targetServer.install_path,
       })
+
       setMetrics(result)
+      setLastLiveUpdate(new Date().toLocaleTimeString())
+
       if (result.status && result.status !== targetServer.status) {
-        setServer(prev => prev ? { ...prev, status: result.status } : prev)
+        const nextServer = { ...targetServer, status: result.status }
+        applyServer(nextServer)
+        await syncStatusToDatabase(targetServer.id, result.status)
       }
+
+      return result
     } catch (error) {
       setMessage((error as Error).message)
+      return null
+    }
+  }
+
+  async function refreshLive() {
+    if (fetchingLiveRef.current) return
+    fetchingLiveRef.current = true
+
+    try {
+      const latestServer = await fetchServer(true)
+      await fetchMetrics(latestServer ?? serverRef.current)
+    } finally {
+      fetchingLiveRef.current = false
     }
   }
 
@@ -102,9 +146,9 @@ export default function ServerDetails() {
   }, [user, id])
 
   useEffect(() => {
-    if (!server) return
-    fetchMetrics(server)
-    const timer = window.setInterval(() => fetchMetrics(server), 5000)
+    if (!server?.id) return
+    refreshLive()
+    const timer = window.setInterval(refreshLive, 5000)
     return () => window.clearInterval(timer)
   }, [server?.id, session?.access_token])
 
@@ -123,12 +167,13 @@ export default function ServerDetails() {
 
       const nextStatus = result.status
       if (nextStatus) {
-        setServer(prev => prev ? { ...prev, status: nextStatus } : prev)
-        await supabase.from('servers').update({ status: nextStatus, updated_at: new Date().toISOString() }).eq('id', server.id).eq('user_id', user?.id)
+        const nextServer = { ...server, status: nextStatus }
+        applyServer(nextServer)
+        await syncStatusToDatabase(server.id, nextStatus)
       }
 
       setMessage(result.message || `${nextAction} completed`)
-      window.setTimeout(() => fetchMetrics(), 800)
+      window.setTimeout(refreshLive, 800)
     } catch (error) {
       setMessage((error as Error).message)
     } finally {
@@ -164,8 +209,9 @@ export default function ServerDetails() {
           <div className="flex items-center gap-3 mb-2">
             <h1 className="text-2xl font-bold text-slate-100 tracking-tight">{server.name}</h1>
             <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border capitalize', statusClass[server.status] ?? statusClass.stopped)}>{server.status}</span>
+            <span className="text-[11px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">Live</span>
           </div>
-          <p className="text-slate-400 text-sm">7 Days To Die on {server.nodes?.name ?? 'Unknown node'}{metrics?.pid ? ` • PID ${metrics.pid}` : ''}</p>
+          <p className="text-slate-400 text-sm">7 Days To Die on {server.nodes?.name ?? 'Unknown node'}{metrics?.pid ? ` • PID ${metrics.pid}` : ''}{lastLiveUpdate ? ` • updated ${lastLiveUpdate}` : ''}</p>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
