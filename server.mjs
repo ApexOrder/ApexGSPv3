@@ -76,8 +76,19 @@ function getDaemonEnv() {
   return loadEnvFile(envPath)
 }
 
+function getDaemonPath(action) {
+  const backupActions = {
+    backup_list: '/api/server/backups/list',
+    backup_create: '/api/server/backups/create',
+    backup_delete: '/api/server/backups/delete',
+  }
+
+  if (backupActions[action]) return backupActions[action]
+  return `/api/server/${action}`
+}
+
 async function proxyDaemon(req, res, action) {
-  const allowed = new Set(['status', 'start', 'stop', 'restart', 'logs', 'metrics', 'config'])
+  const allowed = new Set(['status', 'start', 'stop', 'restart', 'logs', 'metrics', 'config', 'backup_list', 'backup_create', 'backup_delete'])
   if (!allowed.has(action)) return sendJson(res, 404, { success: false, error: 'Unknown direct action' })
 
   if (!(await validateUser(req))) return sendJson(res, 401, { success: false, error: 'Unauthorized' })
@@ -90,7 +101,7 @@ async function proxyDaemon(req, res, action) {
 
   if (!nodeId || !nodeSecret) return sendJson(res, 500, { success: false, error: 'Daemon credentials missing on panel server' })
 
-  const response = await fetch(`${daemonUrl.replace(/\/$/, '')}/api/server/${action}`, {
+  const response = await fetch(`${daemonUrl.replace(/\/$/, '')}${getDaemonPath(action)}`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
