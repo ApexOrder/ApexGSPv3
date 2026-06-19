@@ -77,7 +77,7 @@ function getDaemonEnv() {
 }
 
 async function proxyDaemon(req, res, action) {
-  const allowed = new Set(['status', 'start', 'stop', 'restart', 'logs', 'metrics'])
+  const allowed = new Set(['status', 'start', 'stop', 'restart', 'logs', 'metrics', 'config'])
   if (!allowed.has(action)) return sendJson(res, 404, { success: false, error: 'Unknown direct action' })
 
   if (!(await validateUser(req))) return sendJson(res, 401, { success: false, error: 'Unauthorized' })
