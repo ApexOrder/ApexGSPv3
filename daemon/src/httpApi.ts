@@ -1,6 +1,7 @@
 import http from 'node:http'
 import { URL } from 'node:url'
 import type { DaemonConfig } from './config.js'
+import { createBackup, deleteBackup, listBackups } from './jobs/backups.js'
 import { updateServerConfig } from './jobs/config.js'
 import { refreshServerStatus, restartServer, startServer, stopServer } from './jobs/manageServer.js'
 import { getServerLogs } from './jobs/serverConsole.js'
@@ -78,6 +79,9 @@ export function startHttpApi(config: DaemonConfig, log: (message: string) => voi
       '/api/server/logs': payload => getServerLogs(payload),
       '/api/server/metrics': payload => getServerMetrics(payload),
       '/api/server/config': payload => updateServerConfig(payload),
+      '/api/server/backups/list': payload => listBackups(payload),
+      '/api/server/backups/create': payload => createBackup(payload),
+      '/api/server/backups/delete': payload => deleteBackup(payload),
     }
 
     const handler = routes[url.pathname]
