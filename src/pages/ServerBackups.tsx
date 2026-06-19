@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Archive, ArrowLeft, RefreshCw, Trash2, Plus } from 'lucide-react'
 import { callNodeApi } from '@/lib/nodeApi'
@@ -12,6 +12,7 @@ type Backup = {
   size: number
   createdAt?: string
   modifiedAt: string
+  status?: 'creating' | 'ready'
 }
 
 type BackupResult = {
@@ -19,6 +20,7 @@ type BackupResult = {
   backups?: Backup[]
   backup?: Backup
   backupFile?: string
+  creating?: boolean
 }
 
 type ServerWithNode = GameServer & {
@@ -40,8 +42,10 @@ export default function ServerBackups() {
   const [backups, setBackups] = useState<Backup[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [creating, setCreating] = useState(false)
   const [message, setMessage] = useState('')
   const [lastUpdated, setLastUpdated] = useState<string | null>(null)
+  const loadingBackupsRef = useRef(false)
 
   async function fetchServer() {
     if (!user || !id) return
@@ -75,18 +79,22 @@ export default function ServerBackups() {
     return result
   }
 
-  async function loadBackups() {
-    if (!server) return
-    setBusy(true)
-    setMessage('Loading backups...')
+  async function loadBackups(showBusy = true) {
+    if (!server || loadingBackupsRef.current) return
+    loadingBackupsRef.current = true
+    if (showBusy) setBusy(true)
+    if (showBusy) setMessage('Loading backups...')
 
     try {
       const result = await directBackups('backup_list')
-      setBackups(result?.backups ?? [])
+      const nextBackups = result?.backups ?? []
+      setBackups(nextBackups)
+      setCreating(Boolean(result?.creating || nextBackups.some(backup => backup.status === 'creating')))
     } catch (error) {
       setMessage((error as Error).message)
     } finally {
-      setBusy(false)
+      loadingBackupsRef.current = false
+      if (showBusy) setBusy(false)
     }
   }
 
@@ -95,12 +103,16 @@ export default function ServerBackups() {
     if (!name) return
 
     setBusy(true)
-    setMessage('Creating backup archive...')
+    setCreating(true)
+    setMessage('Starting backup archive...')
 
     try {
-      await directBackups('backup_create', { backupName: name })
-      await loadBackups()
+      const result = await directBackups('backup_create', { backupName: name })
+      if (result?.backup) setBackups(prev => [result.backup as Backup, ...prev])
+      setMessage(result?.message || 'Backup creation started')
+      window.setTimeout(() => loadBackups(false), 1000)
     } catch (error) {
+      setCreating(false)
       setMessage((error as Error).message)
     } finally {
       setBusy(false)
@@ -115,7 +127,8 @@ export default function ServerBackups() {
 
     try {
       await directBackups('backup_delete', { backupFile: name })
-      await loadBackups()
+      setBackups(prev => prev.filter(backup => backup.name !== name))
+      await loadBackups(false)
     } catch (error) {
       setMessage((error as Error).message)
     } finally {
@@ -130,6 +143,12 @@ export default function ServerBackups() {
   useEffect(() => {
     if (server) loadBackups()
   }, [server?.id])
+
+  useEffect(() => {
+    if (!server || !creating) return
+    const timer = window.setInterval(() => loadBackups(false), 3000)
+    return () => window.clearInterval(timer)
+  }, [server?.id, creating, session?.access_token])
 
   if (loading) return <div className="p-8 text-slate-400">Loading backups...</div>
   if (!server) return <div className="p-8 text-slate-400">Server not found.</div>
@@ -146,12 +165,13 @@ export default function ServerBackups() {
           <div className="flex items-center gap-2">
             <Archive className="w-5 h-5 text-brand-400" />
             <h1 className="text-2xl font-bold text-slate-100 tracking-tight">Backups</h1>
+            {creating && <span className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">Creating</span>}
           </div>
           <p className="text-slate-400 text-sm mt-1">Create and manage backups for {server.name}</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={loadBackups} disabled={busy} className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 disabled:opacity-40">
-            <RefreshCw className={busy ? 'w-4 h-4 animate-spin' : 'w-4 h-4'} /> Refresh
+          <button onClick={() => loadBackups()} disabled={busy} className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 disabled:opacity-40">
+            <RefreshCw className={busy || creating ? 'w-4 h-4 animate-spin' : 'w-4 h-4'} /> Refresh
           </button>
           <button onClick={createBackup} disabled={busy} className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-brand-600 text-white hover:bg-brand-500 disabled:opacity-40">
             <Plus className="w-4 h-4" /> Create Backup
@@ -166,26 +186,33 @@ export default function ServerBackups() {
 
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
         <div className="grid grid-cols-12 gap-3 px-4 py-3 border-b border-slate-800 text-xs font-semibold text-slate-500">
-          <div className="col-span-6">Name</div>
+          <div className="col-span-5">Name</div>
           <div className="col-span-2 text-right">Size</div>
-          <div className="col-span-3">Modified</div>
+          <div className="col-span-2">Status</div>
+          <div className="col-span-2">Modified</div>
           <div className="col-span-1 text-right">Action</div>
         </div>
 
         {backups.length === 0 ? (
           <p className="p-6 text-sm text-slate-500">No backups yet. Create one to test Direct API backup creation.</p>
-        ) : backups.map(backup => (
-          <div key={backup.name} className="grid grid-cols-12 gap-3 px-4 py-3 border-b border-slate-800 last:border-b-0 items-center hover:bg-slate-800/40">
-            <div className="col-span-6 text-sm text-slate-200 font-mono truncate">{backup.name}</div>
-            <div className="col-span-2 text-right text-xs text-slate-400">{formatSize(backup.size)}</div>
-            <div className="col-span-3 text-xs text-slate-500">{new Date(backup.modifiedAt).toLocaleString()}</div>
-            <div className="col-span-1 text-right">
-              <button onClick={() => deleteBackup(backup.name)} disabled={busy} className="p-1.5 rounded text-slate-500 hover:text-red-300 hover:bg-red-500/10 disabled:opacity-40">
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
+        ) : backups.map(backup => {
+          const isCreating = backup.status === 'creating' || backup.name.endsWith('.partial')
+          return (
+            <div key={backup.name} className="grid grid-cols-12 gap-3 px-4 py-3 border-b border-slate-800 last:border-b-0 items-center hover:bg-slate-800/40">
+              <div className="col-span-5 text-sm text-slate-200 font-mono truncate">{backup.name}</div>
+              <div className="col-span-2 text-right text-xs text-slate-400">{formatSize(backup.size)}</div>
+              <div className="col-span-2 text-xs">
+                <span className={isCreating ? 'text-amber-300' : 'text-emerald-400'}>{isCreating ? 'Creating...' : 'Ready'}</span>
+              </div>
+              <div className="col-span-2 text-xs text-slate-500">{new Date(backup.modifiedAt).toLocaleString()}</div>
+              <div className="col-span-1 text-right">
+                <button onClick={() => deleteBackup(backup.name)} disabled={busy || isCreating} className="p-1.5 rounded text-slate-500 hover:text-red-300 hover:bg-red-500/10 disabled:opacity-40">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
