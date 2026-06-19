@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { runCommand } from '../utils/exec.js'
+import { spawn } from 'node:child_process'
 import type { JobContext } from './index.js'
 
 type BackupPayload = {
@@ -34,7 +34,7 @@ function backupRoot(serverId: string) {
 }
 
 function safeBackupPath(serverId: string, fileName: string) {
-  if (!fileName.endsWith('.tar.gz')) throw new Error('Invalid backup file')
+  if (!fileName.endsWith('.tar.gz') && !fileName.endsWith('.tar.gz.partial')) throw new Error('Invalid backup file')
   if (fileName.includes('/') || fileName.includes('\\')) throw new Error('Invalid backup file')
   const root = backupRoot(serverId)
   const resolved = path.resolve(root, fileName)
@@ -47,6 +47,15 @@ function cleanName(value?: string) {
   return base.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-').slice(0, 80)
 }
 
+async function exists(filePath: string) {
+  try {
+    await fs.access(filePath)
+    return true
+  } catch {
+    return false
+  }
+}
+
 async function listBackupEntries(serverId: string) {
   const root = backupRoot(serverId)
   await fs.mkdir(root, { recursive: true })
@@ -54,10 +63,17 @@ async function listBackupEntries(serverId: string) {
   const files = []
 
   for (const name of names) {
-    if (!name.endsWith('.tar.gz')) continue
+    if (!name.endsWith('.tar.gz') && !name.endsWith('.tar.gz.partial')) continue
     const filePath = safeBackupPath(serverId, name)
     const stat = await fs.stat(filePath)
-    files.push({ name, path: filePath, size: stat.size, createdAt: stat.birthtime.toISOString(), modifiedAt: stat.mtime.toISOString() })
+    files.push({
+      name,
+      path: filePath,
+      size: stat.size,
+      createdAt: stat.birthtime.toISOString(),
+      modifiedAt: stat.mtime.toISOString(),
+      status: name.endsWith('.partial') ? 'creating' : 'ready',
+    })
   }
 
   files.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt))
@@ -68,7 +84,8 @@ export async function listBackups(payload: unknown, ctx?: JobContext) {
   const input = readPayload(payload)
   await ctx?.reportProgress({ progress: 50, message: 'Listing backups', serverId: input.serverId })
   const backups = await listBackupEntries(input.serverId)
-  return { message: 'Backups loaded', serverId: input.serverId, status: 'backups_loaded', backups }
+  const creating = backups.some(backup => backup.status === 'creating')
+  return { message: creating ? 'Backup is still being created' : 'Backups loaded', serverId: input.serverId, status: creating ? 'backup_creating' : 'backups_loaded', backups, creating }
 }
 
 export async function createBackup(payload: unknown, ctx?: JobContext) {
@@ -78,16 +95,40 @@ export async function createBackup(payload: unknown, ctx?: JobContext) {
   await fs.mkdir(root, { recursive: true })
 
   const name = `${cleanName(input.backupName)}.tar.gz`
-  const filePath = safeBackupPath(input.serverId, name)
+  const finalPath = safeBackupPath(input.serverId, name)
+  const partialName = `${name}.partial`
+  const partialPath = safeBackupPath(input.serverId, partialName)
 
-  await ctx?.reportProgress({ progress: 20, message: 'Creating backup archive', serverId: input.serverId, backupFile: name })
+  if (await exists(finalPath) || await exists(partialPath)) throw new Error(`Backup already exists: ${name}`)
 
-  const result = await runCommand('tar', ['-czf', filePath, '-C', serverRoot, '.'], 10 * 60 * 1000)
-  if (!result.ok) throw new Error(result.stderr || result.error || 'Failed to create backup')
+  await ctx?.reportProgress({ progress: 20, message: 'Starting backup archive', serverId: input.serverId, backupFile: name })
 
-  const stat = await fs.stat(filePath)
-  await ctx?.reportProgress({ progress: 100, message: 'Backup created', serverId: input.serverId, backupFile: name })
-  return { message: 'Backup created', serverId: input.serverId, status: 'backup_created', backup: { name, path: filePath, size: stat.size, modifiedAt: stat.mtime.toISOString() } }
+  const child = spawn('tar', ['-czf', partialPath, '-C', serverRoot, '.'], {
+    detached: true,
+    stdio: 'ignore',
+  })
+
+  child.unref()
+
+  void (async () => {
+    await new Promise<void>(resolve => child.once('exit', () => resolve()))
+    try {
+      if (child.exitCode === 0 && await exists(partialPath)) {
+        await fs.rename(partialPath, finalPath)
+      } else {
+        await fs.rm(partialPath, { force: true })
+      }
+    } catch {
+      await fs.rm(partialPath, { force: true }).catch(() => undefined)
+    }
+  })()
+
+  return {
+    message: 'Backup creation started',
+    serverId: input.serverId,
+    status: 'backup_started',
+    backup: { name, path: finalPath, partialName, partialPath, size: 0, modifiedAt: new Date().toISOString(), status: 'creating' },
+  }
 }
 
 export async function deleteBackup(payload: unknown, ctx?: JobContext) {
