@@ -1,6 +1,6 @@
 import type { Session } from '@supabase/supabase-js'
 
-export type NodeAction = 'status' | 'start' | 'stop' | 'restart' | 'logs' | 'metrics'
+export type NodeAction = 'status' | 'start' | 'stop' | 'restart' | 'logs' | 'metrics' | 'config'
 
 export async function callNodeApi<T>(session: Session | null, action: NodeAction, payload: Record<string, unknown>): Promise<T> {
   if (!session?.access_token) throw new Error('Not authenticated')
