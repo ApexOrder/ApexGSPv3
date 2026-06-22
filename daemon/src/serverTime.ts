@@ -9,14 +9,18 @@ function offsetLabel(date: Date) {
 
 export async function getServerTime() {
   const now = new Date()
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || process.env.TZ || 'System local time'
+  const configuredTimeZone = process.env.APEXGSP_TIME_ZONE?.trim() || process.env.TZ?.trim() || ''
+  const resolvedTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'System local time'
+  const timeZone = configuredTimeZone || resolvedTimeZone
 
   return {
     message: 'Server time loaded',
     localIso: now.toISOString(),
-    localDisplay: now.toLocaleString(),
+    localDisplay: now.toLocaleString('en-GB', { timeZone }),
     utcDisplay: now.toUTCString(),
     timeZone,
+    resolvedTimeZone,
+    configuredTimeZone: configuredTimeZone || null,
     utcOffset: offsetLabel(now),
     schedulesUse: 'daemon_local_time',
   }
