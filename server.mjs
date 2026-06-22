@@ -88,6 +88,7 @@ function getDaemonPath(action) {
     schedule_save: '/api/server/schedules/save',
     schedule_delete: '/api/server/schedules/delete',
     schedule_run: '/api/server/schedules/run',
+    schedule_time: '/api/server/schedules/time',
   }
 
   if (backupActions[action]) return backupActions[action]
@@ -95,7 +96,7 @@ function getDaemonPath(action) {
 }
 
 async function proxyDaemon(req, res, action) {
-  const allowed = new Set(['status', 'start', 'stop', 'restart', 'logs', 'metrics', 'config', 'backup_list', 'backup_create', 'backup_delete', 'backup_restore', 'backup_restore_world', 'backup_restore_full', 'schedule_list', 'schedule_save', 'schedule_delete', 'schedule_run'])
+  const allowed = new Set(['status', 'start', 'stop', 'restart', 'logs', 'metrics', 'config', 'backup_list', 'backup_create', 'backup_delete', 'backup_restore', 'backup_restore_world', 'backup_restore_full', 'schedule_list', 'schedule_save', 'schedule_delete', 'schedule_run', 'schedule_time'])
   if (!allowed.has(action)) return sendJson(res, 404, { success: false, error: 'Unknown direct action' })
 
   if (!(await validateUser(req))) return sendJson(res, 401, { success: false, error: 'Unauthorized' })
