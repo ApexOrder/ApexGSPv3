@@ -14,6 +14,7 @@ import ServerBackups from '@/pages/ServerBackups'
 import ServerConsole from '@/pages/ServerConsole'
 import ServerFiles from '@/pages/ServerFiles'
 import ServerSettings from '@/pages/ServerSettings'
+import ServerScheduler from '@/pages/ServerScheduler'
 import Profile from '@/pages/Profile'
 import Settings from '@/pages/Settings'
 
@@ -35,6 +36,7 @@ export default function App() {
             <Route path="/servers/:id/console" element={<ServerConsole />} />
             <Route path="/servers/:id/files" element={<ServerFiles />} />
             <Route path="/servers/:id/settings" element={<ServerSettings />} />
+            <Route path="/servers/:id/scheduler" element={<ServerScheduler />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/settings" element={<Settings />} />
           </Route>
