@@ -25,10 +25,19 @@ type BackupSchedule = {
   lastError?: string | null
 }
 
+type DaemonTime = {
+  iso: string
+  local: string
+  timeZone: string
+  offset: string
+}
+
 type ScheduleResult = {
   message?: string
   schedules?: BackupSchedule[]
   schedule?: BackupSchedule
+  scheduleId?: string
+  daemonTime?: DaemonTime
 }
 
 function formatDate(value?: string | null) {
@@ -42,6 +51,7 @@ export default function ServerScheduler() {
   const { user, session } = useAuth()
   const [server, setServer] = useState<GameServer | null>(null)
   const [schedules, setSchedules] = useState<BackupSchedule[]>([])
+  const [daemonTime, setDaemonTime] = useState<DaemonTime | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
@@ -54,19 +64,13 @@ export default function ServerScheduler() {
 
   async function fetchServer() {
     if (!user || !id) return
-    const { data, error } = await supabase
-      .from('servers')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('id', id)
-      .maybeSingle()
-
+    const { data, error } = await supabase.from('servers').select('*').eq('user_id', user.id).eq('id', id).maybeSingle()
     if (error) setMessage(error.message)
     setServer((data ?? null) as GameServer | null)
     setLoading(false)
   }
 
-  async function direct(action: 'schedule_list' | 'schedule_save' | 'schedule_run', extra: Record<string, unknown> = {}) {
+  async function direct(action: 'schedule_list' | 'schedule_save' | 'schedule_delete' | 'schedule_run', extra: Record<string, unknown> = {}) {
     if (!server) return null
     const result = await callNodeApi<ScheduleResult>(session, action, {
       server_id: server.id,
@@ -74,6 +78,7 @@ export default function ServerScheduler() {
       installPath: server.install_path,
       ...extra,
     })
+    if (result.daemonTime) setDaemonTime(result.daemonTime)
     setMessage(result.message || 'Schedule action completed')
     return result
   }
@@ -116,38 +121,37 @@ export default function ServerScheduler() {
     }
   }
 
-  useEffect(() => {
-    fetchServer()
-  }, [user, id])
+  async function removeSchedule(schedule: BackupSchedule) {
+    if (!confirm(`Remove ${schedule.backupMode} ${schedule.frequency} schedule?`)) return
+    setBusy(true)
+    try {
+      await direct('schedule_delete', { scheduleId: schedule.id })
+      setSchedules(prev => prev.filter(item => item.id !== schedule.id))
+    } catch (error) {
+      setMessage((error as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
 
-  useEffect(() => {
-    if (server) loadSchedules()
-  }, [server?.id])
+  useEffect(() => { fetchServer() }, [user, id])
+  useEffect(() => { if (server) loadSchedules() }, [server?.id])
 
   if (loading) return <div className="p-8 text-slate-400">Loading scheduler...</div>
   if (!server) return <div className="p-8 text-slate-400">Server not found.</div>
 
   return (
     <div className="p-8 max-w-6xl mx-auto">
-      <button onClick={() => navigate(`/servers/${server.id}`)} className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-200 mb-8 transition-colors">
-        <ArrowLeft className="w-4 h-4" /> Back to server
-      </button>
+      <button onClick={() => navigate(`/servers/${server.id}`)} className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-200 mb-8 transition-colors"><ArrowLeft className="w-4 h-4" /> Back to server</button>
 
       <div className="flex items-center justify-between mb-6">
-        <div>
-          <div className="flex items-center gap-2">
-            <CalendarClock className="w-5 h-5 text-brand-400" />
-            <h1 className="text-2xl font-bold text-slate-100 tracking-tight">Scheduler</h1>
-          </div>
-          <p className="text-slate-400 text-sm mt-1">Automated backups for {server.name}</p>
-        </div>
-        <button onClick={loadSchedules} disabled={busy} className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 disabled:opacity-40">
-          <RefreshCw className={busy ? 'w-4 h-4 animate-spin' : 'w-4 h-4'} /> Refresh
-        </button>
+        <div><div className="flex items-center gap-2"><CalendarClock className="w-5 h-5 text-brand-400" /><h1 className="text-2xl font-bold text-slate-100 tracking-tight">Scheduler</h1></div><p className="text-slate-400 text-sm mt-1">Automated backups for {server.name}</p></div>
+        <button onClick={loadSchedules} disabled={busy} className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 disabled:opacity-40"><RefreshCw className={busy ? 'w-4 h-4 animate-spin' : 'w-4 h-4'} /> Refresh</button>
       </div>
 
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 mb-4">
-        <p className="text-xs text-slate-400">Direct API: <span className="text-slate-200 font-mono">{message || 'Ready'}</span></p>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+        <div className="md:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4"><p className="text-xs text-slate-400">Direct API: <span className="text-slate-200 font-mono">{message || 'Ready'}</span></p></div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4"><p className="text-xs text-slate-500 mb-1">Daemon local time</p><p className="text-sm text-slate-200 font-mono">{daemonTime?.local || 'Loading...'}</p><p className="text-xs text-slate-500 mt-1">{daemonTime ? `${daemonTime.timeZone} • ${daemonTime.offset}` : 'Used for schedule triggers'}</p></div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
@@ -165,14 +169,11 @@ export default function ServerScheduler() {
         </div>
 
         <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-          <div className="grid grid-cols-12 gap-3 px-4 py-3 border-b border-slate-800 text-xs font-semibold text-slate-500"><div className="col-span-2">Mode</div><div className="col-span-2">Frequency</div><div className="col-span-3">Next</div><div className="col-span-3">Last</div><div className="col-span-2 text-right">Action</div></div>
+          <div className="grid grid-cols-12 gap-3 px-4 py-3 border-b border-slate-800 text-xs font-semibold text-slate-500"><div className="col-span-2">Mode</div><div className="col-span-2">Frequency</div><div className="col-span-3">Next</div><div className="col-span-3">Last</div><div className="col-span-2 text-right">Actions</div></div>
           {schedules.length === 0 ? <p className="p-6 text-sm text-slate-500">No schedules yet.</p> : schedules.map(schedule => (
             <div key={schedule.id} className="grid grid-cols-12 gap-3 px-4 py-3 border-b border-slate-800 last:border-b-0 items-center hover:bg-slate-800/40">
-              <div className="col-span-2 text-xs capitalize text-slate-300">{schedule.backupMode}</div>
-              <div className="col-span-2 text-xs capitalize text-slate-400">{schedule.frequency}</div>
-              <div className="col-span-3 text-xs text-slate-400">{formatDate(schedule.nextRunAt)}</div>
-              <div className="col-span-3 text-xs text-slate-500">{formatDate(schedule.lastRunAt)}{schedule.lastError ? ` • ${schedule.lastError}` : ''}</div>
-              <div className="col-span-2 text-right"><button onClick={() => runNow(schedule)} disabled={busy} className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 disabled:opacity-40"><Play className="w-3 h-3" /> Run</button></div>
+              <div className="col-span-2 text-xs capitalize text-slate-300">{schedule.backupMode}</div><div className="col-span-2 text-xs capitalize text-slate-400">{schedule.frequency}</div><div className="col-span-3 text-xs text-slate-400">{formatDate(schedule.nextRunAt)}</div><div className="col-span-3 text-xs text-slate-500">{formatDate(schedule.lastRunAt)}{schedule.lastError ? ` • ${schedule.lastError}` : ''}</div>
+              <div className="col-span-2 text-right flex justify-end gap-1"><button onClick={() => runNow(schedule)} disabled={busy} className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 disabled:opacity-40"><Play className="w-3 h-3" /> Run</button><button onClick={() => removeSchedule(schedule)} disabled={busy} className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs text-red-300 bg-red-500/10 hover:bg-red-500/20 disabled:opacity-40">Remove</button></div>
             </div>
           ))}
         </div>
