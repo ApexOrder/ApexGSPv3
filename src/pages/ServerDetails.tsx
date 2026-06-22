@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Play, RefreshCw, RotateCw, Square, Terminal, Folder, Archive, Settings, Activity, Cpu, HardDrive, MemoryStick, Clock } from 'lucide-react'
+import { ArrowLeft, Play, RefreshCw, RotateCw, Square, Terminal, Folder, Archive, Settings, Activity, Cpu, HardDrive, MemoryStick, Clock, CalendarClock } from 'lucide-react'
 import { callNodeApi } from '@/lib/nodeApi'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
@@ -249,11 +249,12 @@ export default function ServerDetails() {
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4"><p className="text-xs text-slate-500 mb-1">Disk Free</p><p className="text-sm text-slate-200 font-medium">{metrics?.disk ? `${formatBytes(metrics.disk.freeBytes)} free` : 'Unknown'}</p><p className="text-xs text-slate-500 mt-1">{metrics?.disk ? `${metrics.disk.usedPercent}% used` : `Created ${timeAgo(server.created_at)}`}</p></div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
         <Link to={`/servers/${server.id}/console`} className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-brand-500/40 transition-colors"><Terminal className="w-5 h-5 text-brand-400 mb-3" /><p className="text-sm text-slate-200 font-semibold">Console</p><p className="text-xs text-slate-500 mt-1">View server output logs</p><p className="text-[11px] text-brand-400 mt-3">Open console</p></Link>
         <Link to={`/servers/${server.id}/files`} className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-brand-500/40 transition-colors"><Folder className="w-5 h-5 text-brand-400 mb-3" /><p className="text-sm text-slate-200 font-semibold">Files</p><p className="text-xs text-slate-500 mt-1">Browse and edit server files</p><p className="text-[11px] text-brand-400 mt-3">Open files</p></Link>
         <Link to={`/servers/${server.id}/settings`} className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-brand-500/40 transition-colors"><Settings className="w-5 h-5 text-brand-400 mb-3" /><p className="text-sm text-slate-200 font-semibold">Settings</p><p className="text-xs text-slate-500 mt-1">Edit server configuration</p><p className="text-[11px] text-brand-400 mt-3">Open settings</p></Link>
-        <Link to={`/servers/${server.id}/backups`} className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-brand-500/40 transition-colors"><Archive className="w-5 h-5 text-brand-400 mb-3" /><p className="text-sm text-slate-200 font-semibold">Backups</p><p className="text-xs text-slate-500 mt-1">Create and delete backups</p><p className="text-[11px] text-brand-400 mt-3">Open backups</p></Link>
+        <Link to={`/servers/${server.id}/backups`} className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-brand-500/40 transition-colors"><Archive className="w-5 h-5 text-brand-400 mb-3" /><p className="text-sm text-slate-200 font-semibold">Backups</p><p className="text-xs text-slate-500 mt-1">Create and restore backups</p><p className="text-[11px] text-brand-400 mt-3">Open backups</p></Link>
+        <Link to={`/servers/${server.id}/scheduler`} className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-brand-500/40 transition-colors"><CalendarClock className="w-5 h-5 text-brand-400 mb-3" /><p className="text-sm text-slate-200 font-semibold">Scheduler</p><p className="text-xs text-slate-500 mt-1">Automate backups</p><p className="text-[11px] text-brand-400 mt-3">Open scheduler</p></Link>
       </div>
     </div>
   )
