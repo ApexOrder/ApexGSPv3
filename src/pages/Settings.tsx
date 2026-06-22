@@ -1,12 +1,18 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Clock, Cpu, Globe, Info, Save } from 'lucide-react'
-import { formatTimeZoneLabel, getPanelTimeZone, setPanelTimeZone, TIME_ZONES } from '@/lib/timezone'
+import { formatTimeZoneDateTime, formatTimeZoneLabel, formatTimeZoneTime, getPanelTimeZone, setPanelTimeZone, TIME_ZONES } from '@/lib/timezone'
 
 export default function Settings() {
   const panelUrl = window.location.origin
   const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/node-api`
   const [timeZone, setTimeZone] = useState(getPanelTimeZone())
+  const [nowTick, setNowTick] = useState(Date.now())
   const [message, setMessage] = useState('')
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowTick(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   function saveTimeZone() {
     setPanelTimeZone(timeZone)
@@ -37,6 +43,12 @@ export default function Settings() {
             <select value={timeZone} onChange={event => setTimeZone(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-brand-500">
               {TIME_ZONES.map(zone => <option key={zone} value={zone}>{formatTimeZoneLabel(zone)}</option>)}
             </select>
+            <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/70 p-3">
+              <p className="text-xs text-slate-500 mb-1">Current time in selected timezone</p>
+              <p className="text-2xl font-semibold text-slate-100 font-mono">{formatTimeZoneTime(timeZone)}</p>
+              <p className="text-xs text-slate-500 mt-1">{formatTimeZoneDateTime(timeZone)} • {formatTimeZoneLabel(timeZone)}</p>
+              <span className="hidden">{nowTick}</span>
+            </div>
             <p className="text-xs text-slate-500 mt-2">Scheduler times will be sent to the daemon using this timezone.</p>
             {message && <p className="text-xs text-emerald-400 mt-2">{message}</p>}
             <button onClick={saveTimeZone} className="mt-3 inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-brand-600 text-white hover:bg-brand-500"><Save className="w-4 h-4" /> Save timezone</button>
