@@ -19,7 +19,7 @@ function loadEnvFile(filePath) {
     const index = trimmed.indexOf('=')
     if (index === -1) continue
     const key = trimmed.slice(0, index).trim()
-    const value = trimmed.slice(index + 1).trim().replace(/^['"]|['"]$/g, '')
+    const value = trimmed.slice(index + 1).trim().replace(/^["']|["']$/g, '')
     env[key] = value
     if (!process.env[key]) process.env[key] = value
   }
@@ -81,6 +81,9 @@ function getDaemonPath(action) {
     backup_list: '/api/server/backups/list',
     backup_create: '/api/server/backups/create',
     backup_delete: '/api/server/backups/delete',
+    backup_restore: '/api/server/backups/restore',
+    backup_restore_world: '/api/server/backups/restore/world',
+    backup_restore_full: '/api/server/backups/restore/full',
   }
 
   if (backupActions[action]) return backupActions[action]
@@ -88,7 +91,7 @@ function getDaemonPath(action) {
 }
 
 async function proxyDaemon(req, res, action) {
-  const allowed = new Set(['status', 'start', 'stop', 'restart', 'logs', 'metrics', 'config', 'backup_list', 'backup_create', 'backup_delete'])
+  const allowed = new Set(['status', 'start', 'stop', 'restart', 'logs', 'metrics', 'config', 'backup_list', 'backup_create', 'backup_delete', 'backup_restore', 'backup_restore_world', 'backup_restore_full'])
   if (!allowed.has(action)) return sendJson(res, 404, { success: false, error: 'Unknown direct action' })
 
   if (!(await validateUser(req))) return sendJson(res, 401, { success: false, error: 'Unauthorized' })
