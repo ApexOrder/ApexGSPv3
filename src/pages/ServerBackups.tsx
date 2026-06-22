@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Archive, ArrowLeft, RefreshCw, Trash2, Plus } from 'lucide-react'
+import { Archive, ArrowLeft, RefreshCw, Trash2, Plus, RotateCcw } from 'lucide-react'
 import { callNodeApi } from '@/lib/nodeApi'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
@@ -9,6 +9,7 @@ import type { GameServer } from '@/lib/types'
 type BackupMode = 'full' | 'world'
 
 type Backup = {
+  id?: string
   name: string
   displayName?: string
   path: string
@@ -17,6 +18,7 @@ type Backup = {
   modifiedAt: string
   status?: 'creating' | 'ready'
   mode?: BackupMode
+  serverId?: string
 }
 
 type BackupResult = {
@@ -25,6 +27,9 @@ type BackupResult = {
   backup?: Backup
   backupFile?: string
   creating?: boolean
+  restored?: boolean
+  restarted?: boolean
+  safetyBackup?: { name: string; path: string }
 }
 
 type ServerWithNode = GameServer & {
@@ -38,6 +43,11 @@ function formatSize(size: number) {
   return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`
 }
 
+function formatDate(value?: string) {
+  if (!value) return 'Unknown'
+  return new Date(value).toLocaleString()
+}
+
 export default function ServerBackups() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -48,6 +58,9 @@ export default function ServerBackups() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [restoring, setRestoring] = useState(false)
+  const [restoreTarget, setRestoreTarget] = useState<Backup | null>(null)
+  const [restartAfterRestore, setRestartAfterRestore] = useState(true)
   const [message, setMessage] = useState('')
   const [lastUpdated, setLastUpdated] = useState<string | null>(null)
   const loadingBackupsRef = useRef(false)
@@ -70,7 +83,7 @@ export default function ServerBackups() {
     setLoading(false)
   }
 
-  async function directBackups(action: 'backup_list' | 'backup_create' | 'backup_delete', extra: Record<string, unknown> = {}) {
+  async function directBackups(action: 'backup_list' | 'backup_create' | 'backup_delete' | 'backup_restore' | 'backup_restore_world' | 'backup_restore_full', extra: Record<string, unknown> = {}) {
     if (!server) return null
 
     const result = await callNodeApi<BackupResult>(session, action, {
@@ -141,6 +154,38 @@ export default function ServerBackups() {
     }
   }
 
+  function openRestoreModal(backup: Backup) {
+    setRestartAfterRestore(true)
+    setRestoreTarget(backup)
+  }
+
+  async function restoreBackup() {
+    if (!restoreTarget) return
+
+    const mode = restoreTarget.mode || 'full'
+    const action = mode === 'world' ? 'backup_restore_world' : 'backup_restore_full'
+
+    setBusy(true)
+    setRestoring(true)
+    setMessage(`Restoring ${restoreTarget.displayName || restoreTarget.name}...`)
+
+    try {
+      const result = await directBackups(action, {
+        backupFile: restoreTarget.name,
+        backupMode: mode,
+        restartAfterRestore,
+      })
+      setRestoreTarget(null)
+      setMessage(result?.message || 'Restore complete')
+      await loadBackups(false)
+    } catch (error) {
+      setMessage((error as Error).message)
+    } finally {
+      setRestoring(false)
+      setBusy(false)
+    }
+  }
+
   useEffect(() => {
     fetchServer()
   }, [user, id])
@@ -171,8 +216,9 @@ export default function ServerBackups() {
             <Archive className="w-5 h-5 text-brand-400" />
             <h1 className="text-2xl font-bold text-slate-100 tracking-tight">Backups</h1>
             {creating && <span className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">Creating</span>}
+            {restoring && <span className="text-[11px] text-blue-300 bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded-full">Restoring</span>}
           </div>
-          <p className="text-slate-400 text-sm mt-1">Create and manage backups for {server.name}</p>
+          <p className="text-slate-400 text-sm mt-1">Create, restore and manage backups for {server.name}</p>
         </div>
         <div className="flex gap-2">
           <select value={backupMode} onChange={event => setBackupMode(event.target.value as BackupMode)} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200 outline-none focus:border-brand-500">
@@ -180,7 +226,7 @@ export default function ServerBackups() {
             <option value="full">Full Backup</option>
           </select>
           <button onClick={() => loadBackups()} disabled={busy} className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 disabled:opacity-40">
-            <RefreshCw className={busy || creating ? 'w-4 h-4 animate-spin' : 'w-4 h-4'} /> Refresh
+            <RefreshCw className={busy || creating || restoring ? 'w-4 h-4 animate-spin' : 'w-4 h-4'} /> Refresh
           </button>
           <button onClick={createBackup} disabled={busy} className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-brand-600 text-white hover:bg-brand-500 disabled:opacity-40">
             <Plus className="w-4 h-4" /> Create Backup
@@ -191,11 +237,11 @@ export default function ServerBackups() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
           <p className="text-xs font-semibold text-slate-300">World Backup</p>
-          <p className="text-xs text-slate-500 mt-1">Backs up saves, config, admins, mods and generated worlds. Faster and smaller.</p>
+          <p className="text-xs text-slate-500 mt-1">Backs up saves, config, admins, mods and generated worlds. Restore overwrites only those archived files.</p>
         </div>
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
           <p className="text-xs font-semibold text-slate-300">Full Backup</p>
-          <p className="text-xs text-slate-500 mt-1">Backs up the full server directory, excluding logs and temp files. Slower but complete.</p>
+          <p className="text-xs text-slate-500 mt-1">Backs up the full server directory, excluding logs and temp files. Restore replaces the server directory after a safety backup.</p>
         </div>
       </div>
 
@@ -206,12 +252,12 @@ export default function ServerBackups() {
 
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
         <div className="grid grid-cols-12 gap-3 px-4 py-3 border-b border-slate-800 text-xs font-semibold text-slate-500">
-          <div className="col-span-4">Name</div>
-          <div className="col-span-2">Mode</div>
+          <div className="col-span-3">Name</div>
+          <div className="col-span-1">Mode</div>
           <div className="col-span-2 text-right">Size</div>
           <div className="col-span-2">Status</div>
-          <div className="col-span-1">Modified</div>
-          <div className="col-span-1 text-right">Action</div>
+          <div className="col-span-2">Modified</div>
+          <div className="col-span-2 text-right">Actions</div>
         </div>
 
         {backups.length === 0 ? (
@@ -220,15 +266,18 @@ export default function ServerBackups() {
           const isCreating = backup.status === 'creating' || backup.name.endsWith('.partial')
           return (
             <div key={backup.name} className="grid grid-cols-12 gap-3 px-4 py-3 border-b border-slate-800 last:border-b-0 items-center hover:bg-slate-800/40">
-              <div className="col-span-4 text-sm text-slate-200 font-mono truncate">{backup.displayName || backup.name}</div>
-              <div className="col-span-2 text-xs capitalize text-slate-400">{backup.mode || 'full'}</div>
+              <div className="col-span-3 text-sm text-slate-200 font-mono truncate" title={backup.displayName || backup.name}>{backup.displayName || backup.name}</div>
+              <div className="col-span-1 text-xs capitalize text-slate-400">{backup.mode || 'full'}</div>
               <div className="col-span-2 text-right text-xs text-slate-400">{formatSize(backup.size)}</div>
               <div className="col-span-2 text-xs">
                 <span className={isCreating ? 'text-amber-300' : 'text-emerald-400'}>{isCreating ? 'Creating...' : 'Ready'}</span>
               </div>
-              <div className="col-span-1 text-xs text-slate-500 truncate">{new Date(backup.modifiedAt).toLocaleTimeString()}</div>
-              <div className="col-span-1 text-right">
-                <button onClick={() => deleteBackup(backup.name)} disabled={busy || isCreating} className="p-1.5 rounded text-slate-500 hover:text-red-300 hover:bg-red-500/10 disabled:opacity-40">
+              <div className="col-span-2 text-xs text-slate-500 truncate" title={formatDate(backup.modifiedAt)}>{formatDate(backup.modifiedAt)}</div>
+              <div className="col-span-2 text-right flex justify-end gap-1">
+                <button onClick={() => openRestoreModal(backup)} disabled={busy || isCreating} className="p-1.5 rounded text-slate-500 hover:text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-40" title="Restore backup">
+                  <RotateCcw className="w-3.5 h-3.5" />
+                </button>
+                <button onClick={() => deleteBackup(backup.name)} disabled={busy || isCreating} className="p-1.5 rounded text-slate-500 hover:text-red-300 hover:bg-red-500/10 disabled:opacity-40" title="Delete backup">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -236,6 +285,40 @@ export default function ServerBackups() {
           )
         })}
       </div>
+
+      {restoreTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-950 p-6 shadow-2xl">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="rounded-xl bg-amber-500/10 p-2 text-amber-300">
+                <RotateCcw className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-100">Restore backup?</h2>
+                <p className="text-xs text-slate-500">{restoreTarget.displayName || restoreTarget.name}</p>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-100 mb-4">
+              This will overwrite current {restoreTarget.mode || 'full'} server data. ApexGSP will validate the archive, create a pre-restore safety backup, stop the server if needed, restore the files, then optionally restart it.
+            </div>
+
+            <label className="flex items-center gap-2 text-sm text-slate-300 mb-6">
+              <input type="checkbox" checked={restartAfterRestore} onChange={event => setRestartAfterRestore(event.target.checked)} className="h-4 w-4 rounded border-slate-700 bg-slate-900" />
+              Restart server after restore if it was running before
+            </label>
+
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setRestoreTarget(null)} disabled={busy} className="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 disabled:opacity-40">
+                Cancel
+              </button>
+              <button onClick={restoreBackup} disabled={busy} className="px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-slate-950 hover:bg-amber-400 disabled:opacity-40">
+                {restoring ? 'Restoring...' : 'Restore Backup'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
