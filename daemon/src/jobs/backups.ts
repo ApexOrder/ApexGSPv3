@@ -3,12 +3,15 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import type { JobContext } from './index.js'
 
+type BackupMode = 'full' | 'world'
+
 type BackupPayload = {
   server_id?: string
   installPath?: string
   install_path?: string
   backupName?: string
   backupFile?: string
+  backupMode?: BackupMode
 }
 
 function readPayload(payload: unknown) {
@@ -18,7 +21,7 @@ function readPayload(payload: unknown) {
   const installPath = input.installPath || input.install_path
   if (!serverId) throw new Error('Missing server_id')
   if (!installPath) throw new Error('Missing installPath')
-  return { serverId, installPath, backupName: input.backupName, backupFile: input.backupFile }
+  return { serverId, installPath, backupName: input.backupName, backupFile: input.backupFile, backupMode: input.backupMode === 'world' ? 'world' as BackupMode : 'full' as BackupMode }
 }
 
 function safeServerRoot(value: string) {
@@ -47,6 +50,12 @@ function cleanName(value?: string) {
   return base.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-').slice(0, 80)
 }
 
+function modeFromName(name: string) {
+  if (name.includes('-world-') || name.startsWith('world-')) return 'world'
+  if (name.includes('-full-') || name.startsWith('full-')) return 'full'
+  return 'full'
+}
+
 async function exists(filePath: string) {
   try {
     await fs.access(filePath)
@@ -66,18 +75,49 @@ async function listBackupEntries(serverId: string) {
     if (!name.endsWith('.tar.gz') && !name.endsWith('.tar.gz.partial')) continue
     const filePath = safeBackupPath(serverId, name)
     const stat = await fs.stat(filePath)
+    const isPartial = name.endsWith('.partial')
+    const displayName = isPartial ? name.replace(/\.partial$/, '') : name
+
     files.push({
       name,
+      displayName,
       path: filePath,
       size: stat.size,
       createdAt: stat.birthtime.toISOString(),
       modifiedAt: stat.mtime.toISOString(),
-      status: name.endsWith('.partial') ? 'creating' : 'ready',
+      status: isPartial ? 'creating' : 'ready',
+      mode: modeFromName(displayName),
     })
   }
 
   files.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt))
   return files
+}
+
+function buildTarArgs(mode: BackupMode, outputPath: string, serverRoot: string) {
+  if (mode === 'world') {
+    return [
+      '-czf', outputPath,
+      '-C', serverRoot,
+      '--ignore-failed-read',
+      'serverconfig.xml',
+      'serveradmin.xml',
+      'Mods',
+      'Saves',
+      'Data/Worlds',
+    ]
+  }
+
+  return [
+    '-czf', outputPath,
+    '-C', serverRoot,
+    '--exclude=./Logs',
+    '--exclude=./logs',
+    '--exclude=*.log',
+    '--exclude=*.dmp',
+    '--exclude=*.tmp',
+    '.',
+  ]
 }
 
 export async function listBackups(payload: unknown, ctx?: JobContext) {
@@ -94,16 +134,17 @@ export async function createBackup(payload: unknown, ctx?: JobContext) {
   const root = backupRoot(input.serverId)
   await fs.mkdir(root, { recursive: true })
 
-  const name = `${cleanName(input.backupName)}.tar.gz`
+  const prefix = input.backupMode === 'world' ? 'world' : 'full'
+  const name = `${prefix}-${cleanName(input.backupName)}.tar.gz`
   const finalPath = safeBackupPath(input.serverId, name)
   const partialName = `${name}.partial`
   const partialPath = safeBackupPath(input.serverId, partialName)
 
   if (await exists(finalPath) || await exists(partialPath)) throw new Error(`Backup already exists: ${name}`)
 
-  await ctx?.reportProgress({ progress: 20, message: 'Starting backup archive', serverId: input.serverId, backupFile: name })
+  await ctx?.reportProgress({ progress: 20, message: 'Starting backup archive', serverId: input.serverId, backupFile: name, backupMode: input.backupMode })
 
-  const child = spawn('tar', ['-czf', partialPath, '-C', serverRoot, '.'], {
+  const child = spawn('tar', buildTarArgs(input.backupMode, partialPath, serverRoot), {
     detached: true,
     stdio: 'ignore',
   })
@@ -124,10 +165,11 @@ export async function createBackup(payload: unknown, ctx?: JobContext) {
   })()
 
   return {
-    message: 'Backup creation started',
+    message: `${input.backupMode === 'world' ? 'World' : 'Full'} backup creation started`,
     serverId: input.serverId,
     status: 'backup_started',
-    backup: { name, path: finalPath, partialName, partialPath, size: 0, modifiedAt: new Date().toISOString(), status: 'creating' },
+    creating: true,
+    backup: { name: partialName, displayName: name, path: partialPath, partialName, partialPath, size: 0, modifiedAt: new Date().toISOString(), status: 'creating', mode: input.backupMode },
   }
 }
 
