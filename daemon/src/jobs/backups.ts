@@ -236,12 +236,9 @@ async function validateBackupArchive(serverId: string, backupFile: string, expec
   return { backupPath, entries }
 }
 
-async function assertNoBackupOrRestoreInProgress(serverId: string) {
+async function assertNoBackupInProgress(serverId: string) {
   const backups = await listBackupEntries(serverId)
   if (backups.some(backup => backup.status === 'creating')) throw new Error('A backup is already running for this server')
-
-  const lockPath = restoreLockPath(serverId)
-  if (await exists(lockPath)) throw new Error('A restore is already running for this server')
 }
 
 async function withRestoreLock<T>(serverId: string, action: () => Promise<T>) {
@@ -348,7 +345,7 @@ export async function restoreBackup(payload: unknown, ctx?: JobContext) {
   const serverRoot = safeRestoreRoot(input.installPath)
 
   return withRestoreLock(input.serverId, async () => {
-    await assertNoBackupOrRestoreInProgress(input.serverId)
+    await assertNoBackupInProgress(input.serverId)
 
     await ctx?.reportProgress({ progress: 10, message: 'Validating backup archive', serverId: input.serverId, backupFile: input.backupFile, backupMode: mode })
     const { backupPath } = await validateBackupArchive(input.serverId, input.backupFile as string, mode)
