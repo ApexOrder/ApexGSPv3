@@ -1,7 +1,7 @@
 import http from 'node:http'
 import { URL } from 'node:url'
 import type { DaemonConfig } from './config.js'
-import { createBackup, deleteBackup, listBackups } from './jobs/backups.js'
+import { createBackup, deleteBackup, listBackups, restoreBackup } from './jobs/backups.js'
 import { updateServerConfig } from './jobs/config.js'
 import { refreshServerStatus, restartServer, startServer, stopServer } from './jobs/manageServer.js'
 import { getServerLogs } from './jobs/serverConsole.js'
@@ -82,6 +82,9 @@ export function startHttpApi(config: DaemonConfig, log: (message: string) => voi
       '/api/server/backups/list': payload => listBackups(payload),
       '/api/server/backups/create': payload => createBackup(payload),
       '/api/server/backups/delete': payload => deleteBackup(payload),
+      '/api/server/backups/restore': payload => restoreBackup(payload),
+      '/api/server/backups/restore/world': payload => restoreBackup({ ...payload, backupMode: 'world' }),
+      '/api/server/backups/restore/full': payload => restoreBackup({ ...payload, backupMode: 'full' }),
     }
 
     const handler = routes[url.pathname]
