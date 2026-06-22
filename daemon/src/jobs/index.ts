@@ -2,7 +2,7 @@ import { testPing } from './testPing.js'
 import { detectTools } from './detectTools.js'
 import { installSteamcmd } from './installSteamcmd.js'
 import { createServer } from './createServer.js'
-import { createBackup, deleteBackup, listBackups } from './backups.js'
+import { createBackup, deleteBackup, listBackups, restoreBackup } from './backups.js'
 import { updateServerConfig } from './config.js'
 import { createFolder, deletePath, listFiles, readFile, writeFile } from './fileManager.js'
 import { refreshServerStatus, restartServer, startServer, stopServer } from './manageServer.js'
@@ -30,6 +30,10 @@ export async function runJob(type: string, payload: unknown, ctx?: JobContext) {
       return createBackup(payload, ctx)
     case 'delete_backup':
       return deleteBackup(payload, ctx)
+    case 'restore_backup':
+    case 'restore_world_backup':
+    case 'restore_full_backup':
+      return restoreBackup(payload, ctx)
     case 'list_files':
       return listFiles(payload, ctx)
     case 'read_file':
