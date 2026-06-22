@@ -49,6 +49,25 @@ function schedulesPath() {
   return path.join(schedulerRoot(), 'backup-schedules.json')
 }
 
+function getDaemonTimeInfo() {
+  const now = new Date()
+  const offsetMinutes = -now.getTimezoneOffset()
+  const sign = offsetMinutes >= 0 ? '+' : '-'
+  const abs = Math.abs(offsetMinutes)
+  const hours = Math.floor(abs / 60).toString().padStart(2, '0')
+  const minutes = (abs % 60).toString().padStart(2, '0')
+  const offset = `UTC${sign}${hours}:${minutes}`
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'System local time'
+
+  return {
+    iso: now.toISOString(),
+    local: now.toLocaleString(),
+    timeZone,
+    offset,
+    offsetMinutes,
+  }
+}
+
 async function exists(filePath: string) {
   try {
     await fs.access(filePath)
@@ -200,7 +219,7 @@ async function runSchedule(schedule: BackupSchedule, ctx?: JobContext) {
 export async function listSchedules(payload: unknown) {
   const { serverId } = readServerPayload(payload)
   const schedules = await readSchedules()
-  return { message: 'Schedules loaded', serverId, schedules: schedules.filter(schedule => schedule.serverId === serverId) }
+  return { message: 'Schedules loaded', serverId, daemonTime: getDaemonTimeInfo(), schedules: schedules.filter(schedule => schedule.serverId === serverId) }
 }
 
 export async function saveSchedule(payload: unknown) {
@@ -212,15 +231,17 @@ export async function saveSchedule(payload: unknown) {
   if (index >= 0) schedules[index] = schedule
   else schedules.push(schedule)
   await writeSchedules(schedules)
-  return { message: 'Schedule saved', schedule }
+  return { message: 'Schedule saved', schedule, daemonTime: getDaemonTimeInfo() }
 }
 
 export async function deleteSchedule(payload: unknown) {
   const input = readPayload(payload)
   if (!input.scheduleId) throw new Error('Missing scheduleId')
   const schedules = await readSchedules()
-  await writeSchedules(schedules.filter(schedule => schedule.id !== input.scheduleId))
-  return { message: 'Schedule deleted', scheduleId: input.scheduleId }
+  const nextSchedules = schedules.filter(schedule => schedule.id !== input.scheduleId)
+  if (nextSchedules.length === schedules.length) throw new Error('Schedule not found')
+  await writeSchedules(nextSchedules)
+  return { message: 'Schedule deleted', scheduleId: input.scheduleId, daemonTime: getDaemonTimeInfo() }
 }
 
 export async function runScheduleNow(payload: unknown, ctx?: JobContext) {
@@ -234,7 +255,7 @@ export async function runScheduleNow(payload: unknown, ctx?: JobContext) {
   const result = await runSchedule(schedule, ctx)
   schedules[index] = { ...schedule, lastRunAt: now.toISOString(), nextRunAt: computeNextRun(schedule, addPeriod(now, schedule.frequency)), lastResult: 'completed', lastError: null, updatedAt: new Date().toISOString() }
   await writeSchedules(schedules)
-  return { message: 'Scheduled backup started', schedule: schedules[index], result }
+  return { message: 'Scheduled backup started', schedule: schedules[index], result, daemonTime: getDaemonTimeInfo() }
 }
 
 let schedulerRunning = false
