@@ -6,6 +6,7 @@ import { updateServerConfig } from './jobs/config.js'
 import { refreshServerStatus, restartServer, startServer, stopServer } from './jobs/manageServer.js'
 import { getServerLogs } from './jobs/serverConsole.js'
 import { getServerMetrics } from './jobs/serverMetrics.js'
+import { listSchedules, runScheduleNow, saveSchedule } from './scheduler.js'
 
 type ApiHandler = (payload: Record<string, unknown>) => Promise<unknown>
 
@@ -65,10 +66,7 @@ export function startHttpApi(config: DaemonConfig, log: (message: string) => voi
 
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
 
-    if (url.pathname === '/health') {
-      return sendJson(res, 200, { success: true, nodeId: config.nodeId })
-    }
-
+    if (url.pathname === '/health') return sendJson(res, 200, { success: true, nodeId: config.nodeId })
     if (req.method !== 'POST') return sendJson(res, 405, { success: false, error: 'Method not allowed' })
 
     const routes: Record<string, ApiHandler> = {
@@ -85,21 +83,17 @@ export function startHttpApi(config: DaemonConfig, log: (message: string) => voi
       '/api/server/backups/restore': payload => restoreBackup(payload),
       '/api/server/backups/restore/world': payload => restoreBackup({ ...payload, backupMode: 'world' }),
       '/api/server/backups/restore/full': payload => restoreBackup({ ...payload, backupMode: 'full' }),
+      '/api/server/schedules/list': payload => listSchedules(payload),
+      '/api/server/schedules/save': payload => saveSchedule(payload),
+      '/api/server/schedules/run': payload => runScheduleNow(payload),
     }
 
     const handler = routes[url.pathname]
     if (!handler) return sendJson(res, 404, { success: false, error: 'Not found' })
-
     return handleAction(req, res, config, handler)
   })
 
-  server.listen(port, host, () => {
-    log(`Daemon HTTP API listening on ${host}:${port}`)
-  })
-
-  server.on('error', error => {
-    log(`Daemon HTTP API failed: ${(error as Error).message}`)
-  })
-
+  server.listen(port, host, () => log(`Daemon HTTP API listening on ${host}:${port}`))
+  server.on('error', error => log(`Daemon HTTP API failed: ${(error as Error).message}`))
   return server
 }
