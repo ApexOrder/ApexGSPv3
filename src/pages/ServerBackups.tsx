@@ -6,13 +6,17 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { GameServer } from '@/lib/types'
 
+type BackupMode = 'full' | 'world'
+
 type Backup = {
   name: string
+  displayName?: string
   path: string
   size: number
   createdAt?: string
   modifiedAt: string
   status?: 'creating' | 'ready'
+  mode?: BackupMode
 }
 
 type BackupResult = {
@@ -40,6 +44,7 @@ export default function ServerBackups() {
   const { user, session } = useAuth()
   const [server, setServer] = useState<ServerWithNode | null>(null)
   const [backups, setBackups] = useState<Backup[]>([])
+  const [backupMode, setBackupMode] = useState<BackupMode>('world')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -99,15 +104,15 @@ export default function ServerBackups() {
   }
 
   async function createBackup() {
-    const name = prompt('Backup name', `backup-${new Date().toISOString().slice(0, 16).replace('T', '-')}`)
+    const name = prompt('Backup name', `${backupMode}-${new Date().toISOString().slice(0, 16).replace('T', '-')}`)
     if (!name) return
 
     setBusy(true)
     setCreating(true)
-    setMessage('Starting backup archive...')
+    setMessage(`Starting ${backupMode} backup archive...`)
 
     try {
-      const result = await directBackups('backup_create', { backupName: name })
+      const result = await directBackups('backup_create', { backupName: name, backupMode })
       if (result?.backup) setBackups(prev => [result.backup as Backup, ...prev])
       setMessage(result?.message || 'Backup creation started')
       window.setTimeout(() => loadBackups(false), 1000)
@@ -170,12 +175,27 @@ export default function ServerBackups() {
           <p className="text-slate-400 text-sm mt-1">Create and manage backups for {server.name}</p>
         </div>
         <div className="flex gap-2">
+          <select value={backupMode} onChange={event => setBackupMode(event.target.value as BackupMode)} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200 outline-none focus:border-brand-500">
+            <option value="world">World Backup</option>
+            <option value="full">Full Backup</option>
+          </select>
           <button onClick={() => loadBackups()} disabled={busy} className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 disabled:opacity-40">
             <RefreshCw className={busy || creating ? 'w-4 h-4 animate-spin' : 'w-4 h-4'} /> Refresh
           </button>
           <button onClick={createBackup} disabled={busy} className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-brand-600 text-white hover:bg-brand-500 disabled:opacity-40">
             <Plus className="w-4 h-4" /> Create Backup
           </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+        <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+          <p className="text-xs font-semibold text-slate-300">World Backup</p>
+          <p className="text-xs text-slate-500 mt-1">Backs up saves, config, admins, mods and generated worlds. Faster and smaller.</p>
+        </div>
+        <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+          <p className="text-xs font-semibold text-slate-300">Full Backup</p>
+          <p className="text-xs text-slate-500 mt-1">Backs up the full server directory, excluding logs and temp files. Slower but complete.</p>
         </div>
       </div>
 
@@ -186,10 +206,11 @@ export default function ServerBackups() {
 
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
         <div className="grid grid-cols-12 gap-3 px-4 py-3 border-b border-slate-800 text-xs font-semibold text-slate-500">
-          <div className="col-span-5">Name</div>
+          <div className="col-span-4">Name</div>
+          <div className="col-span-2">Mode</div>
           <div className="col-span-2 text-right">Size</div>
           <div className="col-span-2">Status</div>
-          <div className="col-span-2">Modified</div>
+          <div className="col-span-1">Modified</div>
           <div className="col-span-1 text-right">Action</div>
         </div>
 
@@ -199,12 +220,13 @@ export default function ServerBackups() {
           const isCreating = backup.status === 'creating' || backup.name.endsWith('.partial')
           return (
             <div key={backup.name} className="grid grid-cols-12 gap-3 px-4 py-3 border-b border-slate-800 last:border-b-0 items-center hover:bg-slate-800/40">
-              <div className="col-span-5 text-sm text-slate-200 font-mono truncate">{backup.name}</div>
+              <div className="col-span-4 text-sm text-slate-200 font-mono truncate">{backup.displayName || backup.name}</div>
+              <div className="col-span-2 text-xs capitalize text-slate-400">{backup.mode || 'full'}</div>
               <div className="col-span-2 text-right text-xs text-slate-400">{formatSize(backup.size)}</div>
               <div className="col-span-2 text-xs">
                 <span className={isCreating ? 'text-amber-300' : 'text-emerald-400'}>{isCreating ? 'Creating...' : 'Ready'}</span>
               </div>
-              <div className="col-span-2 text-xs text-slate-500">{new Date(backup.modifiedAt).toLocaleString()}</div>
+              <div className="col-span-1 text-xs text-slate-500 truncate">{new Date(backup.modifiedAt).toLocaleTimeString()}</div>
               <div className="col-span-1 text-right">
                 <button onClick={() => deleteBackup(backup.name)} disabled={busy || isCreating} className="p-1.5 rounded text-slate-500 hover:text-red-300 hover:bg-red-500/10 disabled:opacity-40">
                   <Trash2 className="w-3.5 h-3.5" />
