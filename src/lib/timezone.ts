@@ -32,3 +32,27 @@ export function formatTimeZoneLabel(timeZone: string) {
   const offset = parts.find(part => part.type === 'timeZoneName')?.value || ''
   return offset ? `${timeZone} (${offset.replace('GMT', 'UTC')})` : timeZone
 }
+
+export function formatTimeZoneTime(timeZone: string) {
+  return new Date().toLocaleTimeString('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+}
+
+export function formatTimeZoneDateTime(timeZone: string) {
+  return new Date().toLocaleString('en-GB', {
+    timeZone,
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+}
