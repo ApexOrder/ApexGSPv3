@@ -7,6 +7,7 @@ import { refreshServerStatus, restartServer, startServer, stopServer } from './j
 import { getServerLogs } from './jobs/serverConsole.js'
 import { getServerMetrics } from './jobs/serverMetrics.js'
 import { deleteSchedule, listSchedules, runScheduleNow, saveSchedule } from './scheduler.js'
+import { getServerTime } from './serverTime.js'
 
 type ApiHandler = (payload: Record<string, unknown>) => Promise<unknown>
 
@@ -87,6 +88,7 @@ export function startHttpApi(config: DaemonConfig, log: (message: string) => voi
       '/api/server/schedules/save': payload => saveSchedule(payload),
       '/api/server/schedules/delete': payload => deleteSchedule(payload),
       '/api/server/schedules/run': payload => runScheduleNow(payload),
+      '/api/server/schedules/time': payload => getServerTime(),
     }
 
     const handler = routes[url.pathname]
