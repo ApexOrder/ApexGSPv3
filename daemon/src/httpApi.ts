@@ -6,7 +6,7 @@ import { updateServerConfig } from './jobs/config.js'
 import { refreshServerStatus, restartServer, startServer, stopServer } from './jobs/manageServer.js'
 import { getServerLogs } from './jobs/serverConsole.js'
 import { getServerMetrics } from './jobs/serverMetrics.js'
-import { listSchedules, runScheduleNow, saveSchedule } from './scheduler.js'
+import { deleteSchedule, listSchedules, runScheduleNow, saveSchedule } from './scheduler.js'
 
 type ApiHandler = (payload: Record<string, unknown>) => Promise<unknown>
 
@@ -85,6 +85,7 @@ export function startHttpApi(config: DaemonConfig, log: (message: string) => voi
       '/api/server/backups/restore/full': payload => restoreBackup({ ...payload, backupMode: 'full' }),
       '/api/server/schedules/list': payload => listSchedules(payload),
       '/api/server/schedules/save': payload => saveSchedule(payload),
+      '/api/server/schedules/delete': payload => deleteSchedule(payload),
       '/api/server/schedules/run': payload => runScheduleNow(payload),
     }
 
