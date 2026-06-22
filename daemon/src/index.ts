@@ -3,6 +3,7 @@ import { loadConfig, persistEnvValue } from './config.js'
 import { completeJob, fetchNextJob, registerNode, reportJobProgress, sendHeartbeat } from './client.js'
 import { startHttpApi } from './httpApi.js'
 import { runJob } from './jobs/index.js'
+import { startScheduler } from './scheduler.js'
 
 const DAEMON_VERSION = '0.1.0-ts'
 
@@ -87,6 +88,7 @@ async function jobLoop() {
 async function main() {
   const config = await ensureRegistered()
   startHttpApi(config, log)
+  startScheduler(log)
   await Promise.all([heartbeatLoop(), jobLoop()])
 }
 
