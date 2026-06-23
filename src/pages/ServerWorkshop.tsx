@@ -12,6 +12,7 @@ type WorkshopMod = {
   enabled: boolean
   installedAt?: string | null
   updatedAt?: string | null
+  appliedAt?: string | null
   status?: string | null
   error?: string | null
 }
@@ -21,6 +22,7 @@ type WorkshopConfig = {
   installPath: string
   appId: string
   workshopRoot: string
+  modsPath?: string
   mods: WorkshopMod[]
   updatedAt: string
 }
@@ -47,6 +49,7 @@ export default function ServerWorkshop() {
   const [mods, setMods] = useState<WorkshopMod[]>([])
   const [appId, setAppId] = useState('251570')
   const [workshopRoot, setWorkshopRoot] = useState('')
+  const [modsPath, setModsPath] = useState('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
@@ -70,6 +73,7 @@ export default function ServerWorkshop() {
     if (result.config) {
       setAppId(result.config.appId || '251570')
       setWorkshopRoot(result.config.workshopRoot || '')
+      setModsPath(result.config.modsPath || '')
       setMods(result.config.mods || [])
     }
     setMessage(result.message || 'Workshop action completed')
@@ -79,35 +83,17 @@ export default function ServerWorkshop() {
   async function loadWorkshop() {
     if (!server) return
     setBusy(true)
-    try {
-      await direct('workshop_list')
-    } catch (error) {
-      setMessage((error as Error).message)
-    } finally {
-      setBusy(false)
-    }
+    try { await direct('workshop_list') } catch (error) { setMessage((error as Error).message) } finally { setBusy(false) }
   }
 
   async function saveWorkshop() {
     setBusy(true)
-    try {
-      await direct('workshop_save', { mods: mods.filter(mod => mod.id.trim()) })
-    } catch (error) {
-      setMessage((error as Error).message)
-    } finally {
-      setBusy(false)
-    }
+    try { await direct('workshop_save', { mods: mods.filter(mod => mod.id.trim()) }) } catch (error) { setMessage((error as Error).message) } finally { setBusy(false) }
   }
 
   async function updateWorkshop() {
     setBusy(true)
-    try {
-      await direct('workshop_update', { mods: mods.filter(mod => mod.id.trim()) })
-    } catch (error) {
-      setMessage((error as Error).message)
-    } finally {
-      setBusy(false)
-    }
+    try { await direct('workshop_update', { mods: mods.filter(mod => mod.id.trim()) }) } catch (error) { setMessage((error as Error).message) } finally { setBusy(false) }
   }
 
   function updateMod(index: number, patch: Partial<WorkshopMod>) {
@@ -132,25 +118,26 @@ export default function ServerWorkshop() {
         <div>
           <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs font-bold text-cyan-200 mb-3"><Wrench className="w-3.5 h-3.5" /> Steam Workshop</div>
           <h1 className="text-3xl font-black text-slate-50 tracking-tight">Workshop Mods</h1>
-          <p className="text-slate-400 text-sm mt-1">Manage Workshop IDs for {server.name}</p>
+          <p className="text-slate-400 text-sm mt-1">Download and apply Workshop mods for {server.name}</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={loadWorkshop} disabled={busy} className="apex-button-muted"><RefreshCw className={busy ? 'w-4 h-4 animate-spin' : 'w-4 h-4'} /> Refresh</button>
           <button onClick={saveWorkshop} disabled={busy} className="apex-button-muted"><Save className="w-4 h-4" /> Save</button>
-          <button onClick={updateWorkshop} disabled={busy || mods.filter(mod => mod.enabled && mod.id.trim()).length === 0} className="apex-button-primary"><DownloadCloud className="w-4 h-4" /> Update Mods</button>
+          <button onClick={updateWorkshop} disabled={busy || mods.filter(mod => mod.enabled && mod.id.trim()).length === 0} className="apex-button-primary"><DownloadCloud className="w-4 h-4" /> Download + Apply</button>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
         <div className="apex-card p-4"><p className="text-xs text-slate-500 mb-1">Steam App ID</p><input value={appId} onChange={event => setAppId(event.target.value)} className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 font-mono outline-none focus:border-emerald-400/40" /></div>
-        <div className="apex-card p-4 lg:col-span-2"><p className="text-xs text-slate-500 mb-1">Workshop cache path</p><p className="text-sm text-slate-200 font-mono truncate">{workshopRoot || 'Not created yet'}</p></div>
+        <div className="apex-card p-4"><p className="text-xs text-slate-500 mb-1">Workshop cache path</p><p className="text-sm text-slate-200 font-mono truncate">{workshopRoot || 'Not created yet'}</p></div>
+        <div className="apex-card p-4"><p className="text-xs text-slate-500 mb-1">Server Mods folder</p><p className="text-sm text-slate-200 font-mono truncate">{modsPath || `${server.install_path}/Mods`}</p></div>
       </div>
 
       <div className="apex-card p-4 mb-6"><p className="text-xs text-slate-400">Direct API: <span className="text-slate-100 font-mono">{message || 'Ready'}</span></p></div>
 
       <div className="apex-card overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
-          <div><p className="text-sm font-black text-slate-100">Mod List</p><p className="text-xs text-slate-500">Add numeric Workshop IDs from Steam.</p></div>
+          <div><p className="text-sm font-black text-slate-100">Mod List</p><p className="text-xs text-slate-500">Update downloads each enabled mod and applies it into the server Mods folder.</p></div>
           <button onClick={() => setMods(prev => [...prev, emptyMod()])} className="apex-button-muted px-3 py-2 text-xs"><Plus className="w-4 h-4" /> Add Mod</button>
         </div>
 
@@ -159,11 +146,11 @@ export default function ServerWorkshop() {
         ) : (
           <div className="divide-y divide-white/10">
             {mods.map((mod, index) => (
-              <div key={`${mod.id}-${index}`} className="grid grid-cols-1 lg:grid-cols-[150px_1fr_120px_160px_90px] gap-3 p-4 items-center hover:bg-white/[0.03]">
+              <div key={`${mod.id}-${index}`} className="grid grid-cols-1 lg:grid-cols-[150px_1fr_120px_180px_90px] gap-3 p-4 items-center hover:bg-white/[0.03]">
                 <input value={mod.id} onChange={event => updateMod(index, { id: event.target.value })} placeholder="Workshop ID" className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 font-mono outline-none focus:border-emerald-400/40" />
                 <input value={mod.name || ''} onChange={event => updateMod(index, { name: event.target.value })} placeholder="Optional name" className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400/40" />
                 <label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" checked={mod.enabled} onChange={event => updateMod(index, { enabled: event.target.checked })} /> Enabled</label>
-                <div><p className="text-xs text-slate-500">Status</p><p className="text-xs text-slate-300 font-mono truncate">{mod.error || mod.status || 'Not installed'} • {formatDate(mod.updatedAt)}</p></div>
+                <div><p className="text-xs text-slate-500">Status</p><p className="text-xs text-slate-300 font-mono truncate">{mod.error || mod.status || 'Not installed'} • {formatDate(mod.appliedAt || mod.updatedAt)}</p></div>
                 <button onClick={() => removeMod(index)} className="inline-flex items-center justify-center gap-1 rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-300 hover:bg-red-500/20"><Trash2 className="w-3.5 h-3.5" /> Remove</button>
               </div>
             ))}
@@ -172,7 +159,7 @@ export default function ServerWorkshop() {
       </div>
 
       <div className="mt-5 apex-card p-5 text-sm text-slate-400">
-        Phase 1 downloads Workshop content using SteamCMD into the daemon cache. Phase 2 will add install/copy rules per game profile so 7DTD mods can be applied automatically to the live server folder.
+        Workshop now downloads enabled mods with SteamCMD and copies them into the live server Mods folder. Restart the game server after applying mod changes.
       </div>
     </div>
   )
