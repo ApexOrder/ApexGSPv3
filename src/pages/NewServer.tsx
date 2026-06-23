@@ -5,6 +5,11 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { Node } from '@/lib/types'
 
+const gameOptions = [
+  { id: '7dtd', label: '7 Days To Die', defaultName: 'My 7DTD Server' },
+  { id: 'dayz', label: 'DayZ', defaultName: 'My DayZ Server' },
+]
+
 function slugify(value: string) {
   return value
     .toLowerCase()
@@ -19,11 +24,13 @@ export default function NewServer() {
   const { user } = useAuth()
   const [nodes, setNodes] = useState<Node[]>([])
   const [nodeId, setNodeId] = useState('')
+  const [game, setGame] = useState('7dtd')
   const [serverName, setServerName] = useState('My 7DTD Server')
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
 
   const selectedNode = useMemo(() => nodes.find(node => node.id === nodeId), [nodes, nodeId])
+  const selectedGame = gameOptions.find(option => option.id === game) ?? gameOptions[0]
 
   useEffect(() => {
     async function loadNodes() {
@@ -44,6 +51,12 @@ export default function NewServer() {
     loadNodes()
   }, [user])
 
+  function handleGameChange(nextGame: string) {
+    setGame(nextGame)
+    const profile = gameOptions.find(option => option.id === nextGame)
+    if (profile) setServerName(profile.defaultName)
+  }
+
   async function createServerJob() {
     if (!user || !selectedNode) return
 
@@ -62,7 +75,7 @@ export default function NewServer() {
       status: 'pending',
       payload: {
         requested_at: new Date().toISOString(),
-        game: '7dtd',
+        game,
         serverName,
         slug,
       },
@@ -90,15 +103,24 @@ export default function NewServer() {
 
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-slate-100 tracking-tight">Create Server</h1>
-        <p className="text-slate-400 text-sm mt-1">Provision a new 7 Days To Die server on one of your online nodes.</p>
+        <p className="text-slate-400 text-sm mt-1">Provision a new game server on one of your online nodes.</p>
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
         <div>
           <label className="block text-sm font-medium text-slate-300 mb-2">Game</label>
-          <div className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-200 text-sm">
-            <Gamepad2 className="w-4 h-4 text-brand-400" />
-            7 Days To Die
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {gameOptions.map(option => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => handleGameChange(option.id)}
+                className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${game === option.id ? 'border-brand-500 bg-brand-500/10 text-brand-200' : 'border-slate-700 bg-slate-950 text-slate-300 hover:border-slate-500'}`}
+              >
+                <Gamepad2 className="w-4 h-4 text-brand-400" />
+                {option.label}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -108,7 +130,7 @@ export default function NewServer() {
             value={serverName}
             onChange={event => setServerName(event.target.value)}
             className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-brand-500"
-            placeholder="My 7DTD Server"
+            placeholder={selectedGame.defaultName}
           />
           <p className="text-xs text-slate-500 mt-1">Install folder: /opt/apexgsp/servers/{slugify(serverName) || 'server-name'}</p>
         </div>
@@ -140,7 +162,7 @@ export default function NewServer() {
           className="flex items-center justify-center gap-2 w-full rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           {submitting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Gamepad2 className="w-4 h-4" />}
-          Queue Create Server Job
+          Queue {selectedGame.label} Create Job
         </button>
       </div>
     </div>
