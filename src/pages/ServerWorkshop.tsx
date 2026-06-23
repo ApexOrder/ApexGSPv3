@@ -1,6 +1,6 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, DownloadCloud, ExternalLink, Plus, RefreshCw, Save, Search, Trash2, Wrench } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, DownloadCloud, ExternalLink, Plus, RefreshCw, Save, Search, Trash2, Wrench } from 'lucide-react'
 import { callNodeApi } from '@/lib/nodeApi'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
@@ -31,14 +31,8 @@ type WorkshopResult = { message?: string; config?: WorkshopConfig }
 type BrowserItem = { id: string; title: string; image: string; author: string; stats: string; url: string }
 type BrowserResult = { appId: string; query: string; sort: string; page: number; items: BrowserItem[] }
 
-function emptyMod(): WorkshopMod {
-  return { id: '', name: '', enabled: true, status: null, error: null }
-}
-
-function formatDate(value?: string | null) {
-  if (!value) return 'Never'
-  return new Date(value).toLocaleString()
-}
+function emptyMod(): WorkshopMod { return { id: '', name: '', enabled: true, status: null, error: null } }
+function formatDate(value?: string | null) { if (!value) return 'Never'; return new Date(value).toLocaleString() }
 
 export default function ServerWorkshop() {
   const { id } = useParams()
@@ -53,10 +47,18 @@ export default function ServerWorkshop() {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [query, setQuery] = useState('')
+  const [catalogueFilter, setCatalogueFilter] = useState('')
   const [sort, setSort] = useState('trend')
+  const [page, setPage] = useState(1)
   const [browserItems, setBrowserItems] = useState<BrowserItem[]>([])
   const [browserBusy, setBrowserBusy] = useState(false)
-  const [browserMessage, setBrowserMessage] = useState('Search Steam Workshop to add mods without copying IDs manually.')
+  const [browserMessage, setBrowserMessage] = useState('Catalogue will load automatically. Filter by title, author, or Workshop ID.')
+
+  const filteredItems = useMemo(() => {
+    const needle = catalogueFilter.trim().toLowerCase()
+    if (!needle) return browserItems
+    return browserItems.filter(item => item.id.includes(needle) || item.title.toLowerCase().includes(needle) || item.author.toLowerCase().includes(needle))
+  }, [browserItems, catalogueFilter])
 
   async function fetchServer() {
     if (!user || !id) return
@@ -95,21 +97,22 @@ export default function ServerWorkshop() {
     try { await direct('workshop_update', { mods: mods.filter(mod => mod.id.trim()) }) } catch (error) { setMessage((error as Error).message) } finally { setBusy(false) }
   }
 
-  async function searchWorkshop(event?: FormEvent) {
+  async function loadCatalogue(nextPage = page, event?: FormEvent) {
     event?.preventDefault()
     if (!session?.access_token) return
     setBrowserBusy(true)
-    setBrowserMessage('Searching Steam Workshop...')
+    setBrowserMessage('Loading Workshop catalogue...')
     try {
       const response = await fetch('/api/workshop/search', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ appId, query, sort }),
+        body: JSON.stringify({ appId, query, sort, page: nextPage }),
       })
       const data = await response.json().catch(() => null) as { success?: boolean; result?: BrowserResult; error?: string } | null
-      if (!response.ok || !data?.success) throw new Error(data?.error || `Workshop search failed: ${response.status}`)
+      if (!response.ok || !data?.success) throw new Error(data?.error || `Workshop catalogue failed: ${response.status}`)
+      setPage(data.result?.page || nextPage)
       setBrowserItems(data.result?.items || [])
-      setBrowserMessage((data.result?.items || []).length ? `${data.result?.items.length} results loaded.` : 'No Workshop results found.')
+      setBrowserMessage((data.result?.items || []).length ? `${data.result?.items.length} catalogue items loaded. Use the filter box to narrow them down.` : 'No Workshop catalogue items found.')
     } catch (error) {
       setBrowserMessage((error as Error).message)
     } finally {
@@ -118,23 +121,16 @@ export default function ServerWorkshop() {
   }
 
   function addBrowserItem(item: BrowserItem) {
-    setMods(prev => {
-      if (prev.some(mod => mod.id === item.id)) return prev
-      return [...prev, { id: item.id, name: item.title, enabled: true, status: null, error: null }]
-    })
+    setMods(prev => prev.some(mod => mod.id === item.id) ? prev : [...prev, { id: item.id, name: item.title, enabled: true, status: null, error: null }])
     setMessage(`Added ${item.title}`)
   }
 
-  function updateMod(index: number, patch: Partial<WorkshopMod>) {
-    setMods(prev => prev.map((mod, i) => i === index ? { ...mod, ...patch } : mod))
-  }
-
-  function removeMod(index: number) {
-    setMods(prev => prev.filter((_, i) => i !== index))
-  }
+  function updateMod(index: number, patch: Partial<WorkshopMod>) { setMods(prev => prev.map((mod, i) => i === index ? { ...mod, ...patch } : mod)) }
+  function removeMod(index: number) { setMods(prev => prev.filter((_, i) => i !== index)) }
 
   useEffect(() => { fetchServer() }, [user, id])
   useEffect(() => { if (server) loadWorkshop() }, [server?.id])
+  useEffect(() => { if (server && session?.access_token) loadCatalogue(1) }, [server?.id, session?.access_token])
 
   if (loading) return <div className="p-8 text-slate-400">Loading Workshop...</div>
   if (!server) return <div className="p-8 text-slate-400">Server not found.</div>
@@ -146,8 +142,8 @@ export default function ServerWorkshop() {
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
         <div>
           <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs font-bold text-cyan-200 mb-3"><Wrench className="w-3.5 h-3.5" /> Steam Workshop</div>
-          <h1 className="text-3xl font-black text-slate-50 tracking-tight">Workshop Browser</h1>
-          <p className="text-slate-400 text-sm mt-1">Browse, add, download and apply Workshop mods for {server.name}</p>
+          <h1 className="text-3xl font-black text-slate-50 tracking-tight">Workshop Catalogue</h1>
+          <p className="text-slate-400 text-sm mt-1">Browse available Workshop mods, filter by title or ID, then add them to {server.name}</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={loadWorkshop} disabled={busy} className="apex-button-muted"><RefreshCw className={busy ? 'w-4 h-4 animate-spin' : 'w-4 h-4'} /> Refresh</button>
@@ -164,28 +160,34 @@ export default function ServerWorkshop() {
 
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_430px] gap-6">
         <div className="space-y-6">
-          <div className="apex-card p-4">
-            <form onSubmit={searchWorkshop} className="grid grid-cols-1 lg:grid-cols-[1fr_180px_120px] gap-3">
-              <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search Steam Workshop, e.g. UI, weapons, vehicles" className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400/40" />
+          <div className="apex-card p-4 space-y-3">
+            <form onSubmit={event => loadCatalogue(1, event)} className="grid grid-cols-1 lg:grid-cols-[1fr_180px_120px] gap-3">
+              <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Catalogue search, e.g. UI, weapons, vehicles" className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400/40" />
               <select value={sort} onChange={event => setSort(event.target.value)} className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400/40">
                 <option value="trend">Trending</option>
                 <option value="mostrecent">Most recent</option>
                 <option value="totaluniquesubscribers">Most subscribed</option>
                 <option value="totalunique">Most popular</option>
               </select>
-              <button disabled={browserBusy} className="apex-button-primary justify-center"><Search className={browserBusy ? 'w-4 h-4 animate-spin' : 'w-4 h-4'} /> Search</button>
+              <button disabled={browserBusy} className="apex-button-primary justify-center"><Search className={browserBusy ? 'w-4 h-4 animate-spin' : 'w-4 h-4'} /> Load</button>
             </form>
-            <p className="text-xs text-slate-500 mt-3">{browserMessage}</p>
+            <input value={catalogueFilter} onChange={event => setCatalogueFilter(event.target.value)} placeholder="Filter loaded catalogue by title, author, or exact Workshop ID" className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400/40" />
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-slate-500">{browserMessage}</p>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => loadCatalogue(Math.max(1, page - 1))} disabled={browserBusy || page <= 1} className="apex-button-muted px-3 py-2 text-xs"><ChevronLeft className="w-3.5 h-3.5" /> Prev</button>
+                <span className="text-xs text-slate-400 font-mono">Page {page}</span>
+                <button type="button" onClick={() => loadCatalogue(page + 1)} disabled={browserBusy} className="apex-button-muted px-3 py-2 text-xs">Next <ChevronRight className="w-3.5 h-3.5" /></button>
+              </div>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {browserItems.map(item => (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {filteredItems.map(item => (
               <div key={item.id} className="apex-card apex-card-hover overflow-hidden">
-                <div className="h-36 bg-slate-950 border-b border-white/10 overflow-hidden">
-                  {item.image ? <img src={item.image} alt={item.title} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-slate-600"><Wrench className="w-8 h-8" /></div>}
-                </div>
+                <div className="h-36 bg-slate-950 border-b border-white/10 overflow-hidden">{item.image ? <img src={item.image} alt={item.title} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-slate-600"><Wrench className="w-8 h-8" /></div>}</div>
                 <div className="p-4">
-                  <p className="text-sm font-black text-slate-100 line-clamp-2">{item.title}</p>
+                  <p className="text-sm font-black text-slate-100 line-clamp-2 min-h-[2.5rem]">{item.title}</p>
                   <p className="text-xs text-slate-500 mt-1 font-mono">ID {item.id}</p>
                   {item.author && <p className="text-xs text-slate-400 mt-1 truncate">by {item.author}</p>}
                   {item.stats && <p className="text-xs text-slate-500 mt-1 truncate">{item.stats}</p>}
@@ -201,37 +203,11 @@ export default function ServerWorkshop() {
 
         <div className="space-y-6">
           <div className="apex-card p-4"><p className="text-xs text-slate-400">Direct API: <span className="text-slate-100 font-mono">{message || 'Ready'}</span></p></div>
-
           <div className="apex-card overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
-              <div><p className="text-sm font-black text-slate-100">Selected Mods</p><p className="text-xs text-slate-500">Enabled mods will be downloaded and applied.</p></div>
-              <button onClick={() => setMods(prev => [...prev, emptyMod()])} className="apex-button-muted px-3 py-2 text-xs"><Plus className="w-4 h-4" /> Manual</button>
-            </div>
-
-            {mods.length === 0 ? (
-              <div className="p-8 text-center"><p className="text-slate-400 text-sm mb-4">No Workshop mods added yet.</p><button onClick={() => setMods([emptyMod()])} className="apex-button-primary"><Plus className="w-4 h-4" /> Add manually</button></div>
-            ) : (
-              <div className="divide-y divide-white/10 max-h-[720px] overflow-y-auto">
-                {mods.map((mod, index) => (
-                  <div key={`${mod.id}-${index}`} className="p-4 hover:bg-white/[0.03] space-y-3">
-                    <div className="grid grid-cols-[1fr_40px] gap-2">
-                      <input value={mod.id} onChange={event => updateMod(index, { id: event.target.value })} placeholder="Workshop ID" className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 font-mono outline-none focus:border-emerald-400/40" />
-                      <button onClick={() => removeMod(index)} className="inline-flex items-center justify-center rounded-xl border border-red-400/20 bg-red-500/10 text-red-300 hover:bg-red-500/20"><Trash2 className="w-3.5 h-3.5" /></button>
-                    </div>
-                    <input value={mod.name || ''} onChange={event => updateMod(index, { name: event.target.value })} placeholder="Optional name" className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400/40" />
-                    <div className="flex items-center justify-between gap-3">
-                      <label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" checked={mod.enabled} onChange={event => updateMod(index, { enabled: event.target.checked })} /> Enabled</label>
-                      <p className="text-xs text-slate-500 font-mono truncate">{mod.error || mod.status || 'Not installed'} • {formatDate(mod.appliedAt || mod.updatedAt)}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/10"><div><p className="text-sm font-black text-slate-100">Selected Mods</p><p className="text-xs text-slate-500">Enabled mods will be downloaded and applied.</p></div><button onClick={() => setMods(prev => [...prev, emptyMod()])} className="apex-button-muted px-3 py-2 text-xs"><Plus className="w-4 h-4" /> Manual</button></div>
+            {mods.length === 0 ? <div className="p-8 text-center"><p className="text-slate-400 text-sm mb-4">No Workshop mods added yet.</p><button onClick={() => setMods([emptyMod()])} className="apex-button-primary"><Plus className="w-4 h-4" /> Add manually</button></div> : <div className="divide-y divide-white/10 max-h-[720px] overflow-y-auto">{mods.map((mod, index) => <div key={`${mod.id}-${index}`} className="p-4 hover:bg-white/[0.03] space-y-3"><div className="grid grid-cols-[1fr_40px] gap-2"><input value={mod.id} onChange={event => updateMod(index, { id: event.target.value })} placeholder="Workshop ID" className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 font-mono outline-none focus:border-emerald-400/40" /><button onClick={() => removeMod(index)} className="inline-flex items-center justify-center rounded-xl border border-red-400/20 bg-red-500/10 text-red-300 hover:bg-red-500/20"><Trash2 className="w-3.5 h-3.5" /></button></div><input value={mod.name || ''} onChange={event => updateMod(index, { name: event.target.value })} placeholder="Optional name" className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400/40" /><div className="flex items-center justify-between gap-3"><label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" checked={mod.enabled} onChange={event => updateMod(index, { enabled: event.target.checked })} /> Enabled</label><p className="text-xs text-slate-500 font-mono truncate">{mod.error || mod.status || 'Not installed'} • {formatDate(mod.appliedAt || mod.updatedAt)}</p></div></div>)}</div>}
           </div>
-
-          <div className="apex-card p-5 text-sm text-slate-400">
-            Search uses Steam Workshop public browse pages. If Steam changes their layout, results may fail, but manual Workshop IDs will still work.
-          </div>
+          <div className="apex-card p-5 text-sm text-slate-400">Catalogue loads from Steam Workshop public browse pages. Manual Workshop IDs still work if Steam blocks or changes catalogue results.</div>
         </div>
       </div>
     </div>
