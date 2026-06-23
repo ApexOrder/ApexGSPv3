@@ -127,6 +127,76 @@ async function proxyDaemon(req, res, action) {
   res.end(text)
 }
 
+function decodeHtml(value) {
+  return String(value || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .trim()
+}
+
+function parseWorkshopItems(html) {
+  const items = []
+  const seen = new Set()
+  const blockRegex = /<div[^>]+id="sharedfile_(\d+)"[\s\S]*?(?=<div[^>]+id="sharedfile_|<div[^>]+class="workshopBrowsePagingControls|$)/g
+  let match
+
+  while ((match = blockRegex.exec(html)) && items.length < 24) {
+    const block = match[0]
+    const id = match[1]
+    if (seen.has(id)) continue
+    seen.add(id)
+
+    const titleMatch = block.match(/class="workshopItemTitle"[^>]*>([\s\S]*?)<\/div>/)
+    const imageMatch = block.match(/<img[^>]+src="([^"]+)"/)
+    const authorMatch = block.match(/class="workshopItemAuthorName"[^>]*>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/)
+    const statsMatch = block.match(/class="workshopItemStats"[^>]*>([\s\S]*?)<\/div>/)
+
+    items.push({
+      id,
+      title: decodeHtml((titleMatch?.[1] || `Workshop ${id}`).replace(/<[^>]+>/g, '')),
+      image: imageMatch?.[1] || '',
+      author: decodeHtml((authorMatch?.[1] || '').replace(/<[^>]+>/g, '')),
+      stats: decodeHtml((statsMatch?.[1] || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')),
+      url: `https://steamcommunity.com/sharedfiles/filedetails/?id=${id}`,
+    })
+  }
+
+  return items
+}
+
+async function searchWorkshop(req, res) {
+  if (!(await validateUser(req))) return sendJson(res, 401, { success: false, error: 'Unauthorized' })
+
+  const payload = await readJson(req)
+  const appId = String(payload.appId || '251570').replace(/\D/g, '') || '251570'
+  const query = String(payload.query || '').trim()
+  const sort = String(payload.sort || 'trend')
+  const page = Math.max(1, Math.min(20, Number(payload.page || 1)))
+
+  const steamUrl = new URL('https://steamcommunity.com/workshop/browse/')
+  steamUrl.searchParams.set('appid', appId)
+  steamUrl.searchParams.set('browsesort', sort)
+  steamUrl.searchParams.set('section', 'readytouseitems')
+  steamUrl.searchParams.set('actualsort', sort)
+  steamUrl.searchParams.set('p', String(page))
+  if (query) steamUrl.searchParams.set('searchtext', query)
+
+  const response = await fetch(steamUrl, {
+    headers: {
+      'user-agent': 'Mozilla/5.0 ApexGSP Workshop Browser',
+      accept: 'text/html,application/xhtml+xml',
+    },
+  })
+
+  if (!response.ok) return sendJson(res, response.status, { success: false, error: `Steam Workshop search failed: ${response.status}` })
+
+  const html = await response.text()
+  return sendJson(res, 200, { success: true, result: { appId, query, sort, page, items: parseWorkshopItems(html) } })
+}
+
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -166,6 +236,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname.startsWith('/api/direct/')) {
       const action = url.pathname.split('/').pop()
       return proxyDaemon(req, res, action)
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/workshop/search') {
+      return searchWorkshop(req, res)
     }
 
     if (req.method !== 'GET' && req.method !== 'HEAD') {
