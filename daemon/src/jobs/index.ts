@@ -7,6 +7,7 @@ import { updateServerConfig } from './config.js'
 import { createFolder, deletePath, listFiles, readFile, writeFile } from './fileManager.js'
 import { refreshServerStatus, restartServer, startServer, stopServer } from './manageServer.js'
 import { getServerLogs } from './serverConsole.js'
+import { listWorkshopMods, saveWorkshopMods, updateWorkshopMods } from './workshop.js'
 
 export interface JobContext {
   reportProgress: (result: Record<string, unknown>) => Promise<void>
@@ -54,6 +55,12 @@ export async function runJob(type: string, payload: unknown, ctx?: JobContext) {
       return refreshServerStatus(payload, ctx)
     case 'get_server_logs':
       return getServerLogs(payload, ctx)
+    case 'workshop_list':
+      return listWorkshopMods(payload)
+    case 'workshop_save':
+      return saveWorkshopMods(payload)
+    case 'workshop_update':
+      return updateWorkshopMods(payload, ctx)
     default:
       throw new Error(`Unsupported job type: ${type}`)
   }
