@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Play, RefreshCw, RotateCw, Square, Terminal, Folder, Archive, Settings, Activity, Cpu, HardDrive, MemoryStick, Clock, CalendarClock, Gamepad2 } from 'lucide-react'
+import { ArrowLeft, Play, RefreshCw, RotateCw, Square, Terminal, Folder, Archive, Settings, Activity, CalendarClock, Gamepad2, Wrench } from 'lucide-react'
 import { callNodeApi } from '@/lib/nodeApi'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
@@ -304,6 +304,7 @@ export default function ServerDetails() {
           <QuickLink to={`/servers/${server.id}/files`} icon={Folder} title="Files" desc="Manage server files" />
           <QuickLink to={`/servers/${server.id}/backups`} icon={Archive} title="Backups" desc="View and restore backups" />
           <QuickLink to={`/servers/${server.id}/scheduler`} icon={CalendarClock} title="Scheduler" desc="Scheduled backups" />
+          <QuickLink to={`/servers/${server.id}/workshop`} icon={Wrench} title="Workshop" desc="Manage Steam Workshop mods" />
           <QuickLink to={`/servers/${server.id}/settings`} icon={Settings} title="Settings" desc="Server configuration" />
         </InfoPanel>
       </div>
