@@ -9,6 +9,7 @@ type WorkshopMod = {
   enabled: boolean
   installedAt?: string | null
   updatedAt?: string | null
+  appliedAt?: string | null
   status?: string | null
   error?: string | null
 }
@@ -18,6 +19,7 @@ type WorkshopConfig = {
   installPath: string
   appId: string
   workshopRoot: string
+  modsPath: string
   mods: WorkshopMod[]
   updatedAt: string
 }
@@ -44,7 +46,7 @@ function requireServer(payload: unknown) {
   const installPath = input.installPath || input.install_path
   if (!serverId) throw new Error('Missing server_id')
   if (!installPath) throw new Error('Missing installPath')
-  return { serverId, installPath, input }
+  return { serverId, installPath: path.resolve(installPath), input }
 }
 
 function workshopBaseRoot() {
@@ -59,10 +61,18 @@ function configPath(serverId: string) {
   return path.join(serverWorkshopRoot(serverId), 'workshop.json')
 }
 
+function serverModsPath(installPath: string) {
+  return path.join(installPath, 'Mods')
+}
+
 function safeId(value: string) {
   const id = String(value || '').trim()
   if (!/^\d{3,20}$/.test(id)) throw new Error(`Invalid Workshop ID: ${value}`)
   return id
+}
+
+function safeFolderName(value: string) {
+  return value.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 90) || 'workshop-mod'
 }
 
 function normaliseMods(input: WorkshopPayload, existing: WorkshopMod[] = []) {
@@ -80,6 +90,7 @@ function normaliseMods(input: WorkshopPayload, existing: WorkshopMod[] = []) {
       enabled: raw.enabled ?? previous?.enabled ?? true,
       installedAt: previous?.installedAt || null,
       updatedAt: previous?.updatedAt || null,
+      appliedAt: previous?.appliedAt || null,
       status: previous?.status || null,
       error: previous?.error || null,
     }
@@ -90,15 +101,24 @@ async function readConfig(serverId: string, installPath: string, appId = DEFAULT
   try {
     const text = await fs.readFile(configPath(serverId), 'utf8')
     const parsed = JSON.parse(text) as WorkshopConfig
-    return { ...parsed, installPath, appId: parsed.appId || appId, workshopRoot: serverWorkshopRoot(serverId), mods: parsed.mods || [] }
+    return { ...parsed, installPath, appId: parsed.appId || appId, workshopRoot: serverWorkshopRoot(serverId), modsPath: parsed.modsPath || serverModsPath(installPath), mods: parsed.mods || [] }
   } catch {
-    return { serverId, installPath, appId, workshopRoot: serverWorkshopRoot(serverId), mods: [], updatedAt: new Date().toISOString() }
+    return { serverId, installPath, appId, workshopRoot: serverWorkshopRoot(serverId), modsPath: serverModsPath(installPath), mods: [], updatedAt: new Date().toISOString() }
   }
 }
 
 async function writeConfig(config: WorkshopConfig) {
   await fs.mkdir(config.workshopRoot, { recursive: true })
   await fs.writeFile(configPath(config.serverId), `${JSON.stringify({ ...config, updatedAt: new Date().toISOString() }, null, 2)}\n`, 'utf8')
+}
+
+async function exists(target: string) {
+  try {
+    await fs.access(target)
+    return true
+  } catch {
+    return false
+  }
 }
 
 async function findSteamcmd() {
@@ -112,6 +132,22 @@ async function findSteamcmd() {
 
 async function report(ctx: JobContext | undefined, progress: number, message: string, extra: Record<string, unknown> = {}) {
   await ctx?.reportProgress({ progress, message, ...extra })
+}
+
+function downloadedWorkshopPath(config: WorkshopConfig, modId: string) {
+  return path.join(config.workshopRoot, 'steamapps', 'workshop', 'content', config.appId, modId)
+}
+
+async function applyMod(config: WorkshopConfig, mod: WorkshopMod) {
+  const source = downloadedWorkshopPath(config, mod.id)
+  if (!(await exists(source))) throw new Error(`Downloaded Workshop folder not found for ${mod.id}`)
+  const destination = path.join(config.modsPath, `${safeFolderName(mod.name || `workshop-${mod.id}`)}-${mod.id}`)
+  await fs.mkdir(config.modsPath, { recursive: true })
+  await fs.cp(source, destination, { recursive: true, force: true })
+  mod.appliedAt = new Date().toISOString()
+  mod.status = 'applied'
+  mod.error = null
+  return destination
 }
 
 export async function listWorkshopMods(payload: unknown) {
@@ -129,6 +165,7 @@ export async function saveWorkshopMods(payload: unknown) {
     installPath,
     appId: input.appId || existing.appId || DEFAULT_APP_ID,
     workshopRoot: serverWorkshopRoot(serverId),
+    modsPath: serverModsPath(installPath),
     mods: normaliseMods(input, existing.mods),
     updatedAt: new Date().toISOString(),
   }
@@ -140,16 +177,18 @@ export async function updateWorkshopMods(payload: unknown, ctx?: JobContext) {
   const { serverId, installPath, input } = requireServer(payload)
   const config = await readConfig(serverId, installPath, input.appId || DEFAULT_APP_ID)
   if (input.mods || input.modIds) config.mods = normaliseMods(input, config.mods)
+  config.modsPath = serverModsPath(installPath)
   const enabled = config.mods.filter(mod => mod.enabled)
   if (enabled.length === 0) throw new Error('No enabled Workshop mods to update')
 
   await fs.mkdir(config.workshopRoot, { recursive: true })
+  await fs.mkdir(config.modsPath, { recursive: true })
   const steamcmd = await findSteamcmd()
   await report(ctx, 5, 'SteamCMD found', { steamcmd })
 
   for (let i = 0; i < enabled.length; i++) {
     const mod = enabled[i]
-    const progress = Math.round(10 + (i / enabled.length) * 80)
+    const progress = Math.round(10 + (i / enabled.length) * 55)
     await report(ctx, progress, `Downloading Workshop mod ${mod.id}`, { modId: mod.id })
 
     const result = await runCommand(steamcmd, [
@@ -168,13 +207,20 @@ export async function updateWorkshopMods(payload: unknown, ctx?: JobContext) {
       throw new Error(`Workshop mod ${mod.id} failed: ${mod.error}`)
     }
 
-    mod.status = 'installed'
+    mod.status = 'downloaded'
     mod.error = null
     mod.installedAt = mod.installedAt || now
     mod.updatedAt = now
   }
 
+  for (let i = 0; i < enabled.length; i++) {
+    const mod = enabled[i]
+    const progress = Math.round(70 + (i / enabled.length) * 25)
+    await report(ctx, progress, `Applying Workshop mod ${mod.id}`, { modId: mod.id })
+    await applyMod(config, mod)
+  }
+
   await writeConfig(config)
-  await report(ctx, 100, 'Workshop mods updated', { mods: enabled.map(mod => mod.id) })
-  return { message: 'Workshop mods updated', config }
+  await report(ctx, 100, 'Workshop mods downloaded and applied', { mods: enabled.map(mod => mod.id), modsPath: config.modsPath })
+  return { message: 'Workshop mods downloaded and applied', config }
 }
