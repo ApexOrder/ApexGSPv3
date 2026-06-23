@@ -89,14 +89,12 @@ async function proxyDaemon(req, res, action) {
   const allowed = new Set(['status', 'start', 'stop', 'restart', 'logs', 'metrics', 'config', 'backup_list', 'backup_create', 'backup_delete', 'backup_restore', 'backup_restore_world', 'backup_restore_full', 'workshop_list', 'workshop_save', 'workshop_update', 'schedule_list', 'schedule_save', 'schedule_delete', 'schedule_run', 'schedule_time'])
   if (!allowed.has(action)) return sendJson(res, 404, { success: false, error: 'Unknown direct action' })
   if (!(await validateUser(req))) return sendJson(res, 401, { success: false, error: 'Unauthorized' })
-
   const payload = await readJson(req)
   const daemonEnv = getDaemonEnv()
   const nodeId = daemonEnv.APEXGSP_NODE_ID || process.env.APEXGSP_NODE_ID
   const nodeSecret = daemonEnv.APEXGSP_NODE_SECRET || process.env.APEXGSP_NODE_SECRET
   const daemonUrl = process.env.APEXGSP_DAEMON_URL || 'http://127.0.0.1:8787'
   if (!nodeId || !nodeSecret) return sendJson(res, 500, { success: false, error: 'Daemon credentials missing on panel server' })
-
   const response = await fetch(`${daemonUrl.replace(/\/$/, '')}${getDaemonPath(action)}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-apexgsp-node-id': nodeId, 'x-apexgsp-node-secret': nodeSecret },
@@ -111,29 +109,25 @@ function decodeHtml(value) {
   return String(value || '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim()
 }
 
-function parseWorkshopItems(html) {
+function parseWorkshopIds(html) {
   const ids = new Set()
-  const patterns = [
-    /sharedfile_(\d+)/g,
-    /sharedfiles\/filedetails\/\?id=(\d+)/g,
-    /filedetails\/\?id=(\d+)/g,
-    /data-publishedfileid="(\d+)"/g,
-  ]
+  const patterns = [/sharedfile_(\d+)/g, /sharedfiles\/filedetails\/\?id=(\d+)/g, /filedetails\/\?id=(\d+)/g, /data-publishedfileid="(\d+)"/g]
   for (const pattern of patterns) {
     let match
-    while ((match = pattern.exec(html)) && ids.size < 24) ids.add(match[1])
+    while ((match = pattern.exec(html)) && ids.size < 48) ids.add(match[1])
   }
-  return [...ids].map(id => ({ id, title: `Workshop ${id}`, image: '', author: '', stats: '', url: `https://steamcommunity.com/sharedfiles/filedetails/?id=${id}` }))
+  return [...ids]
 }
 
 async function getWorkshopDetails(ids) {
-  if (!ids.length) return []
+  const unique = [...new Set(ids.map(id => String(id).replace(/\D/g, '')).filter(Boolean))].slice(0, 50)
+  if (!unique.length) return []
   const params = new URLSearchParams()
-  params.set('itemcount', String(ids.length))
-  ids.forEach((id, index) => params.set(`publishedfileids[${index}]`, id))
+  params.set('itemcount', String(unique.length))
+  unique.forEach((id, index) => params.set(`publishedfileids[${index}]`, id))
   const response = await fetch('https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/', {
     method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    headers: { 'content-type': 'application/x-www-form-urlencoded', 'user-agent': 'ApexGSP Workshop Catalogue' },
     body: params.toString(),
   })
   if (!response.ok) return []
@@ -146,7 +140,45 @@ async function getWorkshopDetails(ids) {
     author: item.creator ? `Creator ${item.creator}` : '',
     stats: item.subscriptions ? `${item.subscriptions} subscribers` : '',
     url: `https://steamcommunity.com/sharedfiles/filedetails/?id=${item.publishedfileid}`,
-  })).filter(item => item.id)
+  })).filter(item => item.id && item.title)
+}
+
+async function fetchWorkshopAjaxCatalogue({ appId, query, sort, page }) {
+  const count = 30
+  const start = Math.max(0, (page - 1) * count)
+  const params = new URLSearchParams()
+  params.set('appid', appId)
+  params.set('query', query)
+  params.set('start', String(start))
+  params.set('count', String(count))
+  params.set('section', 'readytouseitems')
+  params.set('browsefilter', sort)
+  params.set('days', '-1')
+  params.set('actualsort', sort)
+  params.set('l', 'english')
+
+  const response = await fetch('https://steamcommunity.com/sharedfiles/ajaxgetworkshopitems/render/', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded; charset=UTF-8', 'user-agent': 'Mozilla/5.0 ApexGSP Workshop Catalogue', accept: 'application/json, text/javascript, */*; q=0.01' },
+    body: params.toString(),
+  })
+  if (!response.ok) return []
+  const data = await response.json().catch(() => null)
+  const html = data?.results_html || data?.html || ''
+  return parseWorkshopIds(html)
+}
+
+async function fetchWorkshopBrowseCatalogue({ appId, query, sort, page }) {
+  const steamUrl = new URL('https://steamcommunity.com/workshop/browse/')
+  steamUrl.searchParams.set('appid', appId)
+  steamUrl.searchParams.set('browsesort', sort)
+  steamUrl.searchParams.set('section', 'readytouseitems')
+  steamUrl.searchParams.set('actualsort', sort)
+  steamUrl.searchParams.set('p', String(page))
+  if (query) steamUrl.searchParams.set('searchtext', query)
+  const response = await fetch(steamUrl, { headers: { 'user-agent': 'Mozilla/5.0 ApexGSP Workshop Catalogue', accept: 'text/html,application/xhtml+xml' } })
+  if (!response.ok) return []
+  return parseWorkshopIds(await response.text())
 }
 
 async function searchWorkshop(req, res) {
@@ -155,22 +187,15 @@ async function searchWorkshop(req, res) {
   const appId = String(payload.appId || '251570').replace(/\D/g, '') || '251570'
   const query = String(payload.query || '').trim()
   const sort = String(payload.sort || 'trend')
-  const page = Math.max(1, Math.min(20, Number(payload.page || 1)))
-  const steamUrl = new URL('https://steamcommunity.com/workshop/browse/')
-  steamUrl.searchParams.set('appid', appId)
-  steamUrl.searchParams.set('browsesort', sort)
-  steamUrl.searchParams.set('section', 'readytouseitems')
-  steamUrl.searchParams.set('actualsort', sort)
-  steamUrl.searchParams.set('p', String(page))
-  if (query) steamUrl.searchParams.set('searchtext', query)
+  const page = Math.max(1, Math.min(50, Number(payload.page || 1)))
 
-  const response = await fetch(steamUrl, { headers: { 'user-agent': 'Mozilla/5.0 ApexGSP Workshop Browser', accept: 'text/html,application/xhtml+xml' } })
-  if (!response.ok) return sendJson(res, response.status, { success: false, error: `Steam Workshop search failed: ${response.status}` })
-  const html = await response.text()
-  const scraped = parseWorkshopItems(html)
-  const details = await getWorkshopDetails(scraped.map(item => item.id))
-  const items = details.length ? details : scraped
-  return sendJson(res, 200, { success: true, result: { appId, query, sort, page, items, debug: { scraped: scraped.length, detailed: details.length } } })
+  let ids = []
+  if (/^\d{5,20}$/.test(query)) ids = [query]
+  if (!ids.length) ids = await fetchWorkshopAjaxCatalogue({ appId, query, sort, page })
+  if (!ids.length) ids = await fetchWorkshopBrowseCatalogue({ appId, query, sort, page })
+
+  const items = await getWorkshopDetails(ids)
+  return sendJson(res, 200, { success: true, result: { appId, query, sort, page, items, debug: { ids: ids.length, details: items.length, source: ids.length ? 'steam-workshop' : 'none' } } })
 }
 
 const mimeTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.ico': 'image/x-icon' }
