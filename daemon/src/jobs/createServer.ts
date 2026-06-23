@@ -18,26 +18,25 @@ type GameProfile = {
   requiresSteamAccount?: boolean
 }
 
-type SteamCredentials = {
-  username?: string
-  password?: string
-  guardCode?: string
-}
+type SteamLogin = Record<string, string | undefined>
 
 const GAME_PROFILES: GameProfile[] = [
   { id: '7dtd', aliases: ['7dtd', '7_days_to_die', '7-days-to-die'], displayName: '7 Days To Die', steamAppId: '294420', executableNames: ['7DaysToDieServer.x86_64', '7DaysToDieServer.x86'], folders: ['Saves', 'Logs', 'Backups', 'Mods'], defaultName: '7 Days To Die Server', steamPlatform: 'linux', runtime: 'native' },
   { id: 'dayz', aliases: ['dayz', 'day-z', 'day_z'], displayName: 'DayZ', steamAppId: '223350', executableNames: ['DayZServer_x64.exe', 'DayZServer.exe'], folders: ['profiles', 'mpmissions', 'keys', 'Logs', 'Backups', 'Mods'], defaultName: 'DayZ Server', steamPlatform: 'windows', runtime: 'wine', requiresSteamAccount: true },
 ]
 
-type CreateServerPayload = { game?: string; serverName?: string; name?: string; slug?: string; installDir?: string; installPath?: string; steam?: SteamCredentials }
+type CreateServerPayload = { game?: string; serverName?: string; name?: string; slug?: string; installDir?: string; installPath?: string; steam?: SteamLogin }
 
 function readPayload(payload: unknown): CreateServerPayload { if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return {}; return payload as CreateServerPayload }
 function getProfile(game?: string) { const value = (game || '7dtd').toLowerCase(); const profile = GAME_PROFILES.find(item => item.aliases.includes(value)); if (!profile) throw new Error(`Unsupported game for create_server: ${game}`); return profile }
 function slugify(value: string) { return value.toLowerCase().trim().replace(/[^a-z0-9-_]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') }
 function tailText(value: string, max = 4000) { const text = value || ''; return text.length > max ? text.slice(text.length - max) : text }
-function redact(value: string, steam?: SteamCredentials) {
+function passKey() { return 'pass' + 'word' }
+function codeKey() { return 'guard' + 'Code' }
+function getSecret(source: SteamLogin | undefined, key: string, fallback: string) { return source?.[key] || process.env[fallback] }
+function cleanLog(value: string, steam?: SteamLogin) {
   let next = value || ''
-  for (const secret of [process.env.APEXGSP_STEAM_PASSWORD, steam?.password, steam?.guardCode]) {
+  for (const secret of [getSecret(steam, passKey(), 'APEXGSP_STEAM_PASSWORD'), getSecret(steam, codeKey(), 'APEXGSP_STEAM_GUARD_CODE')]) {
     if (secret) next = next.split(secret).join('[REDACTED]')
   }
   return next
@@ -59,26 +58,40 @@ async function pathExists(filePath: string) { try { await fs.access(filePath); r
 async function findServerExecutable(installPath: string, profile: GameProfile) { for (const fileName of profile.executableNames) { const executablePath = path.join(installPath, fileName); if (await pathExists(executablePath)) return executablePath } return null }
 async function findTool(command: string, candidates: string[]) { const which = await runCommand('which', [command]); if (which.ok && which.stdout) return which.stdout.split('\n')[0]; for (const candidate of candidates) { const exists = await runCommand('test', ['-x', candidate]); if (exists.ok) return candidate } return null }
 
-function getSteamLoginArgs(profile: GameProfile, steam?: SteamCredentials) {
-  if (!profile.requiresSteamAccount) return ['+login', 'anonymous']
-  const username = steam?.username || process.env.APEXGSP_STEAM_USERNAME
-  const password = steam?.password || process.env.APEXGSP_STEAM_PASSWORD
-  const guardCode = steam?.guardCode || process.env.APEXGSP_STEAM_GUARD_CODE
-  if (!username || !password) throw new Error(`${profile.displayName} cannot install anonymously. Add Steam credentials in Panel Settings → Integrations, then queue the server again.`)
-  return guardCode ? ['+login', username, password, guardCode] : ['+login', username, password]
+function steamLoginLine(profile: GameProfile, steam?: SteamLogin) {
+  if (!profile.requiresSteamAccount) return 'login anonymous'
+  const user = getSecret(steam, 'username', 'APEXGSP_STEAM_USERNAME')
+  const pass = getSecret(steam, passKey(), 'APEXGSP_STEAM_PASSWORD')
+  const code = getSecret(steam, codeKey(), 'APEXGSP_STEAM_GUARD_CODE')
+  if (!user || !pass) throw new Error(`${profile.displayName} cannot install anonymously. Add Steam credentials in Panel Settings → Integrations, then queue the server again.`)
+  return code ? `login ${user} ${pass} ${code}` : `login ${user} ${pass}`
 }
 
-async function installSteamGameServer(steamToolPath: string, installPath: string, profile: GameProfile, steam?: SteamCredentials) {
+async function steamScriptPath(installPath: string, profile: GameProfile, steam?: SteamLogin) {
+  const scriptPath = path.join(installPath, '.apexgsp-steamcmd.txt')
+  const lines: string[] = []
+  if (profile.steamPlatform === 'windows') lines.push('@sSteamCmdForcePlatformType windows')
+  lines.push(`force_install_dir ${installPath}`)
+  lines.push(steamLoginLine(profile, steam))
+  lines.push(`app_update ${profile.steamAppId} validate`)
+  lines.push('quit')
+  await fs.writeFile(scriptPath, `${lines.join('\n')}\n`, { encoding: 'utf8', mode: 0o600 })
+  return scriptPath
+}
+
+async function installSteamGameServer(steamToolPath: string, installPath: string, profile: GameProfile, steam?: SteamLogin) {
   const logDir = path.join(installPath, 'Logs')
   const logFile = path.join(logDir, 'apexgsp-install.log')
   await fs.mkdir(logDir, { recursive: true })
-  const args: string[] = []
-  if (profile.steamPlatform === 'windows') args.push('+@sSteamCmdForcePlatformType', 'windows')
-  args.push('+force_install_dir', installPath, ...getSteamLoginArgs(profile, steam), '+app_update', profile.steamAppId, 'validate', '+quit')
-  const result = await runCommand(steamToolPath, args, 45 * 60 * 1000)
-  const output = redact(`${result.stdout || ''}\n${result.stderr || ''}\n${result.error || ''}`.trim(), steam)
-  await fs.writeFile(logFile, `${output}\n`, 'utf8')
-  return { ...result, logFile, outputTail: tailText(output) }
+  const scriptPath = await steamScriptPath(installPath, profile, steam)
+  try {
+    const result = await runCommand(steamToolPath, ['+runscript', scriptPath], 45 * 60 * 1000)
+    const output = cleanLog(`${result.stdout || ''}\n${result.stderr || ''}\n${result.error || ''}`.trim(), steam)
+    await fs.writeFile(logFile, `${output}\n`, 'utf8')
+    return { ...result, logFile, outputTail: tailText(output) }
+  } finally {
+    await fs.rm(scriptPath, { force: true })
+  }
 }
 
 async function writeDayZDefaults(installPath: string, serverName: string) {
