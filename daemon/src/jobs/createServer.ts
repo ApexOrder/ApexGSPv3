@@ -18,18 +18,30 @@ type GameProfile = {
   requiresSteamAccount?: boolean
 }
 
+type SteamCredentials = {
+  username?: string
+  password?: string
+  guardCode?: string
+}
+
 const GAME_PROFILES: GameProfile[] = [
   { id: '7dtd', aliases: ['7dtd', '7_days_to_die', '7-days-to-die'], displayName: '7 Days To Die', steamAppId: '294420', executableNames: ['7DaysToDieServer.x86_64', '7DaysToDieServer.x86'], folders: ['Saves', 'Logs', 'Backups', 'Mods'], defaultName: '7 Days To Die Server', steamPlatform: 'linux', runtime: 'native' },
   { id: 'dayz', aliases: ['dayz', 'day-z', 'day_z'], displayName: 'DayZ', steamAppId: '223350', executableNames: ['DayZServer_x64.exe', 'DayZServer.exe'], folders: ['profiles', 'mpmissions', 'keys', 'Logs', 'Backups', 'Mods'], defaultName: 'DayZ Server', steamPlatform: 'windows', runtime: 'wine', requiresSteamAccount: true },
 ]
 
-type CreateServerPayload = { game?: string; serverName?: string; name?: string; slug?: string; installDir?: string; installPath?: string }
+type CreateServerPayload = { game?: string; serverName?: string; name?: string; slug?: string; installDir?: string; installPath?: string; steam?: SteamCredentials }
 
 function readPayload(payload: unknown): CreateServerPayload { if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return {}; return payload as CreateServerPayload }
 function getProfile(game?: string) { const value = (game || '7dtd').toLowerCase(); const profile = GAME_PROFILES.find(item => item.aliases.includes(value)); if (!profile) throw new Error(`Unsupported game for create_server: ${game}`); return profile }
 function slugify(value: string) { return value.toLowerCase().trim().replace(/[^a-z0-9-_]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') }
 function tailText(value: string, max = 4000) { const text = value || ''; return text.length > max ? text.slice(text.length - max) : text }
-function redact(value: string) { const password = process.env.APEXGSP_STEAM_PASSWORD; return password ? value.split(password).join('[REDACTED_STEAM_PASSWORD]') : value }
+function redact(value: string, steam?: SteamCredentials) {
+  let next = value || ''
+  for (const secret of [process.env.APEXGSP_STEAM_PASSWORD, steam?.password, steam?.guardCode]) {
+    if (secret) next = next.split(secret).join('[REDACTED]')
+  }
+  return next
+}
 
 function resolveInstallTarget(payload: CreateServerPayload, profile: GameProfile) {
   const name = payload.serverName || payload.name || profile.defaultName
@@ -47,23 +59,24 @@ async function pathExists(filePath: string) { try { await fs.access(filePath); r
 async function findServerExecutable(installPath: string, profile: GameProfile) { for (const fileName of profile.executableNames) { const executablePath = path.join(installPath, fileName); if (await pathExists(executablePath)) return executablePath } return null }
 async function findTool(command: string, candidates: string[]) { const which = await runCommand('which', [command]); if (which.ok && which.stdout) return which.stdout.split('\n')[0]; for (const candidate of candidates) { const exists = await runCommand('test', ['-x', candidate]); if (exists.ok) return candidate } return null }
 
-function getSteamLoginArgs(profile: GameProfile) {
+function getSteamLoginArgs(profile: GameProfile, steam?: SteamCredentials) {
   if (!profile.requiresSteamAccount) return ['+login', 'anonymous']
-  const username = process.env.APEXGSP_STEAM_USERNAME
-  const password = process.env.APEXGSP_STEAM_PASSWORD
-  if (!username || !password) throw new Error(`${profile.displayName} cannot install anonymously. Add APEXGSP_STEAM_USERNAME and APEXGSP_STEAM_PASSWORD to the daemon .env, then restart apexgspd.`)
-  return ['+login', username, password]
+  const username = steam?.username || process.env.APEXGSP_STEAM_USERNAME
+  const password = steam?.password || process.env.APEXGSP_STEAM_PASSWORD
+  const guardCode = steam?.guardCode || process.env.APEXGSP_STEAM_GUARD_CODE
+  if (!username || !password) throw new Error(`${profile.displayName} cannot install anonymously. Add Steam credentials in Panel Settings → Integrations, then queue the server again.`)
+  return guardCode ? ['+login', username, password, guardCode] : ['+login', username, password]
 }
 
-async function installSteamGameServer(steamToolPath: string, installPath: string, profile: GameProfile) {
+async function installSteamGameServer(steamToolPath: string, installPath: string, profile: GameProfile, steam?: SteamCredentials) {
   const logDir = path.join(installPath, 'Logs')
   const logFile = path.join(logDir, 'apexgsp-install.log')
   await fs.mkdir(logDir, { recursive: true })
   const args: string[] = []
   if (profile.steamPlatform === 'windows') args.push('+@sSteamCmdForcePlatformType', 'windows')
-  args.push('+force_install_dir', installPath, ...getSteamLoginArgs(profile), '+app_update', profile.steamAppId, 'validate', '+quit')
+  args.push('+force_install_dir', installPath, ...getSteamLoginArgs(profile, steam), '+app_update', profile.steamAppId, 'validate', '+quit')
   const result = await runCommand(steamToolPath, args, 45 * 60 * 1000)
-  const output = redact(`${result.stdout || ''}\n${result.stderr || ''}\n${result.error || ''}`.trim())
+  const output = redact(`${result.stdout || ''}\n${result.stderr || ''}\n${result.error || ''}`.trim(), steam)
   await fs.writeFile(logFile, `${output}\n`, 'utf8')
   return { ...result, logFile, outputTail: tailText(output) }
 }
@@ -91,7 +104,7 @@ export async function createServer(payload: unknown, ctx?: JobContext) {
   if (!steamToolPath) throw new Error('SteamCMD is not installed. Run install_steamcmd first.')
   if (profile.runtime === 'wine') { const winePath = await findTool('wine', ['/usr/bin/wine', '/usr/local/bin/wine']); if (!winePath) throw new Error(`${profile.displayName} requires Wine on Linux. Install wine64/wine before creating this server.`) }
   await ctx?.reportProgress({ progress: 45, message: `Installing ${profile.displayName} dedicated server`, path: target.installPath, runtime: profile.runtime })
-  const install = await installSteamGameServer(steamToolPath, target.installPath, profile)
+  const install = await installSteamGameServer(steamToolPath, target.installPath, profile, input.steam)
   if (!install.ok) throw new Error(`${profile.displayName} install failed. Full log: ${install.logFile}\n${install.outputTail}`)
   if (profile.id === 'dayz') await writeDayZDefaults(target.installPath, target.name)
   await ctx?.reportProgress({ progress: 85, message: `Verifying ${profile.displayName} installation`, path: target.installPath })
