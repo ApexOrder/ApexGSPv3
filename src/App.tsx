@@ -7,6 +7,8 @@ import AuthCallback from '@/pages/AuthCallback'
 import Dashboard from '@/pages/Dashboard'
 import Nodes from '@/pages/Nodes'
 import AddNode from '@/pages/AddNode'
+import Jobs from '@/pages/Jobs'
+import JobConsole from '@/pages/JobConsole'
 import Servers from '@/pages/Servers'
 import NewServer from '@/pages/NewServer'
 import ServerDetails from '@/pages/ServerDetails'
@@ -30,6 +32,8 @@ export default function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/nodes" element={<Nodes />} />
             <Route path="/nodes/add" element={<AddNode />} />
+            <Route path="/jobs" element={<Jobs />} />
+            <Route path="/jobs/:id" element={<JobConsole />} />
             <Route path="/servers" element={<Servers />} />
             <Route path="/servers/new" element={<NewServer />} />
             <Route path="/servers/:id" element={<ServerDetails />} />
