@@ -8,6 +8,7 @@ import { createFolder, deletePath, listFiles, readFile, writeFile } from './file
 import { refreshServerStatus, restartServer, startServer, stopServer } from './manageServer.js'
 import { getServerLogs } from './serverConsole.js'
 import { listWorkshopMods, saveWorkshopMods, updateWorkshopMods } from './workshop.js'
+import { installModFromUpload, installModFromUrl, listMods, removeMod } from './modManager.js'
 
 export interface JobContext {
   reportProgress: (result: Record<string, unknown>) => Promise<void>
@@ -15,53 +16,34 @@ export interface JobContext {
 
 export async function runJob(type: string, payload: unknown, ctx?: JobContext) {
   switch (type) {
-    case 'test_ping':
-      return testPing()
-    case 'detect_tools':
-      return detectTools()
-    case 'install_steamcmd':
-      return installSteamcmd(payload, ctx)
-    case 'create_server':
-      return createServer(payload, ctx)
-    case 'update_server_config':
-      return updateServerConfig(payload, ctx)
-    case 'list_backups':
-      return listBackups(payload, ctx)
-    case 'create_backup':
-      return createBackup(payload, ctx)
-    case 'delete_backup':
-      return deleteBackup(payload, ctx)
+    case 'test_ping': return testPing()
+    case 'detect_tools': return detectTools()
+    case 'install_steamcmd': return installSteamcmd(payload, ctx)
+    case 'create_server': return createServer(payload, ctx)
+    case 'update_server_config': return updateServerConfig(payload, ctx)
+    case 'list_backups': return listBackups(payload, ctx)
+    case 'create_backup': return createBackup(payload, ctx)
+    case 'delete_backup': return deleteBackup(payload, ctx)
     case 'restore_backup':
     case 'restore_world_backup':
-    case 'restore_full_backup':
-      return restoreBackup(payload, ctx)
-    case 'list_files':
-      return listFiles(payload, ctx)
-    case 'read_file':
-      return readFile(payload, ctx)
-    case 'write_file':
-      return writeFile(payload, ctx)
-    case 'create_folder':
-      return createFolder(payload, ctx)
-    case 'delete_path':
-      return deletePath(payload, ctx)
-    case 'start_server':
-      return startServer(payload, ctx)
-    case 'stop_server':
-      return stopServer(payload, ctx)
-    case 'restart_server':
-      return restartServer(payload, ctx)
-    case 'refresh_server_status':
-      return refreshServerStatus(payload, ctx)
-    case 'get_server_logs':
-      return getServerLogs(payload, ctx)
-    case 'workshop_list':
-      return listWorkshopMods(payload)
-    case 'workshop_save':
-      return saveWorkshopMods(payload)
-    case 'workshop_update':
-      return updateWorkshopMods(payload, ctx)
-    default:
-      throw new Error(`Unsupported job type: ${type}`)
+    case 'restore_full_backup': return restoreBackup(payload, ctx)
+    case 'list_files': return listFiles(payload, ctx)
+    case 'read_file': return readFile(payload, ctx)
+    case 'write_file': return writeFile(payload, ctx)
+    case 'create_folder': return createFolder(payload, ctx)
+    case 'delete_path': return deletePath(payload, ctx)
+    case 'start_server': return startServer(payload, ctx)
+    case 'stop_server': return stopServer(payload, ctx)
+    case 'restart_server': return restartServer(payload, ctx)
+    case 'refresh_server_status': return refreshServerStatus(payload, ctx)
+    case 'get_server_logs': return getServerLogs(payload, ctx)
+    case 'workshop_list': return listWorkshopMods(payload)
+    case 'workshop_save': return saveWorkshopMods(payload)
+    case 'workshop_update': return updateWorkshopMods(payload, ctx)
+    case 'mods_list': return listMods(payload)
+    case 'mods_install_url': return installModFromUrl(payload, ctx)
+    case 'mods_install_upload': return installModFromUpload(payload, ctx)
+    case 'mods_remove': return removeMod(payload)
+    default: throw new Error(`Unsupported job type: ${type}`)
   }
 }
