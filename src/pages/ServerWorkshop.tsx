@@ -1,51 +1,60 @@
-import { useEffect, useState } from 'react'
+import { ChangeEvent, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, DownloadCloud, ExternalLink, Plus, RefreshCw, Save, Trash2, UploadCloud, Wrench } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Link as LinkIcon, RefreshCw, Trash2, UploadCloud, Wrench } from 'lucide-react'
 import { callNodeApi } from '@/lib/nodeApi'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { GameServer } from '@/lib/types'
 
-type WorkshopMod = {
+type ModEntry = {
   id: string
-  name?: string
+  name: string
+  sourceType: 'url' | 'upload' | 'nexus' | 'manual'
+  source?: string
   enabled: boolean
-  installedAt?: string | null
-  updatedAt?: string | null
-  appliedAt?: string | null
-  status?: string | null
+  status: 'installed' | 'disabled' | 'failed'
+  installedAt: string
+  updatedAt: string
+  folderName: string
   error?: string | null
 }
 
-type WorkshopConfig = {
+type ModConfig = {
   serverId: string
   installPath: string
-  appId: string
-  workshopRoot: string
-  modsPath?: string
-  mods: WorkshopMod[]
+  modsPath: string
+  stagingPath: string
+  mods: ModEntry[]
   updatedAt: string
 }
 
-type WorkshopResult = { message?: string; config?: WorkshopConfig }
+type ModResult = { message?: string; config?: ModConfig; mod?: ModEntry }
+const NEXUS_7DTD_URL = 'https://www.nexusmods.com/7daystodie'
 
-function emptyMod(): WorkshopMod { return { id: '', name: '', enabled: true, status: null, error: null } }
 function formatDate(value?: string | null) { if (!value) return 'Never'; return new Date(value).toLocaleString() }
 
-const NEXUS_7DTD_URL = 'https://www.nexusmods.com/7daystodie'
+async function fileToBase64(file: File) {
+  const buffer = await file.arrayBuffer()
+  let binary = ''
+  const bytes = new Uint8Array(buffer)
+  const chunkSize = 0x8000
+  for (let i = 0; i < bytes.length; i += chunkSize) binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
+  return btoa(binary)
+}
 
 export default function ServerWorkshop() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { user, session } = useAuth()
   const [server, setServer] = useState<GameServer | null>(null)
-  const [mods, setMods] = useState<WorkshopMod[]>([])
-  const [appId, setAppId] = useState('251570')
-  const [workshopRoot, setWorkshopRoot] = useState('')
-  const [modsPath, setModsPath] = useState('')
+  const [config, setConfig] = useState<ModConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+  const [url, setUrl] = useState('')
+  const [urlName, setUrlName] = useState('')
+  const [uploadName, setUploadName] = useState('')
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
 
   async function fetchServer() {
     if (!user || !id) return
@@ -55,15 +64,10 @@ export default function ServerWorkshop() {
     setLoading(false)
   }
 
-  async function direct(action: 'workshop_list' | 'workshop_save' | 'workshop_update', extra: Record<string, unknown> = {}) {
+  async function callMods(action: 'mods_list' | 'mods_install_url' | 'mods_install_upload' | 'mods_remove', extra: Record<string, unknown> = {}) {
     if (!server) return null
-    const result = await callNodeApi<WorkshopResult>(session, action, { server_id: server.id, installPath: server.install_path, appId, ...extra })
-    if (result.config) {
-      setAppId(result.config.appId || '251570')
-      setWorkshopRoot(result.config.workshopRoot || '')
-      setModsPath(result.config.modsPath || '')
-      setMods(result.config.mods || [])
-    }
+    const result = await callNodeApi<ModResult>(session, action, { server_id: server.id, installPath: server.install_path, ...extra })
+    if (result.config) setConfig(result.config)
     setMessage(result.message || 'Mod action completed')
     return result
   }
@@ -71,21 +75,42 @@ export default function ServerWorkshop() {
   async function loadMods() {
     if (!server) return
     setBusy(true)
-    try { await direct('workshop_list') } catch (error) { setMessage((error as Error).message) } finally { setBusy(false) }
+    try { await callMods('mods_list') } catch (error) { setMessage((error as Error).message) } finally { setBusy(false) }
   }
 
-  async function saveMods() {
+  async function installUrl() {
+    if (!url.trim()) return setMessage('Paste a direct ZIP URL or Nexus URL first')
     setBusy(true)
-    try { await direct('workshop_save', { mods: mods.filter(mod => mod.id.trim()) }) } catch (error) { setMessage((error as Error).message) } finally { setBusy(false) }
+    try {
+      await callMods('mods_install_url', { url: url.trim(), name: urlName.trim() || undefined })
+      setUrl('')
+      setUrlName('')
+    } catch (error) { setMessage((error as Error).message) } finally { setBusy(false) }
   }
 
-  async function updateMods() {
+  async function installUpload() {
+    if (!uploadFile) return setMessage('Choose a ZIP file first')
+    if (!uploadFile.name.toLowerCase().endsWith('.zip')) return setMessage('Only ZIP files are supported right now')
     setBusy(true)
-    try { await direct('workshop_update', { mods: mods.filter(mod => mod.id.trim()) }) } catch (error) { setMessage((error as Error).message) } finally { setBusy(false) }
+    try {
+      const fileBase64 = await fileToBase64(uploadFile)
+      await callMods('mods_install_upload', { fileName: uploadFile.name, fileBase64, name: uploadName.trim() || undefined })
+      setUploadFile(null)
+      setUploadName('')
+      const input = document.getElementById('mod-upload-input') as HTMLInputElement | null
+      if (input) input.value = ''
+    } catch (error) { setMessage((error as Error).message) } finally { setBusy(false) }
   }
 
-  function updateMod(index: number, patch: Partial<WorkshopMod>) { setMods(prev => prev.map((mod, i) => i === index ? { ...mod, ...patch } : mod)) }
-  function removeMod(index: number) { setMods(prev => prev.filter((_, i) => i !== index)) }
+  async function removeInstalledMod(modId: string) {
+    if (!confirm('Remove this mod from the server Mods folder?')) return
+    setBusy(true)
+    try { await callMods('mods_remove', { modId }) } catch (error) { setMessage((error as Error).message) } finally { setBusy(false) }
+  }
+
+  function onFileChange(event: ChangeEvent<HTMLInputElement>) {
+    setUploadFile(event.target.files?.[0] || null)
+  }
 
   useEffect(() => { fetchServer() }, [user, id])
   useEffect(() => { if (server) loadMods() }, [server?.id])
@@ -93,69 +118,71 @@ export default function ServerWorkshop() {
   if (loading) return <div className="p-8 text-slate-400">Loading mods...</div>
   if (!server) return <div className="p-8 text-slate-400">Server not found.</div>
 
+  const mods = config?.mods || []
+
   return (
-    <div className="p-8 max-w-6xl mx-auto">
+    <div className="p-8 max-w-7xl mx-auto">
       <button onClick={() => navigate(`/servers/${server.id}`)} className="apex-button-muted mb-8"><ArrowLeft className="w-4 h-4" /> Back to server</button>
 
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
         <div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-amber-400/20 bg-amber-400/10 px-3 py-1 text-xs font-bold text-amber-200 mb-3"><Wrench className="w-3.5 h-3.5" /> 7 Days To Die Mods</div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-bold text-emerald-200 mb-3"><Wrench className="w-3.5 h-3.5" /> 7 Days To Die Mods</div>
           <h1 className="text-3xl font-black text-slate-50 tracking-tight">Mod Manager</h1>
-          <p className="text-slate-400 text-sm mt-1">7 Days To Die does not expose a normal Steam Workshop catalogue, so Nexus/manual mod support is the correct route.</p>
+          <p className="text-slate-400 text-sm mt-1">Install from direct ZIP URLs, Nexus/manual URLs, or upload a ZIP from your PC.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={loadMods} disabled={busy} className="apex-button-muted"><RefreshCw className={busy ? 'w-4 h-4 animate-spin' : 'w-4 h-4'} /> Refresh</button>
-          <button onClick={saveMods} disabled={busy} className="apex-button-muted"><Save className="w-4 h-4" /> Save</button>
-          <button onClick={updateMods} disabled={busy || mods.filter(mod => mod.enabled && mod.id.trim()).length === 0} className="apex-button-primary"><DownloadCloud className="w-4 h-4" /> Apply Steam IDs</button>
-        </div>
+        <button onClick={loadMods} disabled={busy} className="apex-button-muted"><RefreshCw className={busy ? 'w-4 h-4 animate-spin' : 'w-4 h-4'} /> Refresh</button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        <div className="apex-card p-4"><p className="text-xs text-slate-500 mb-1">Server Mods folder</p><p className="text-sm text-slate-200 font-mono truncate">{config?.modsPath || `${server.install_path}/Mods`}</p></div>
+        <div className="apex-card p-4"><p className="text-xs text-slate-500 mb-1">Staging folder</p><p className="text-sm text-slate-200 font-mono truncate">{config?.stagingPath || 'Not created yet'}</p></div>
+        <div className="apex-card p-4"><p className="text-xs text-slate-500 mb-1">Installed mods</p><p className="text-2xl font-black text-emerald-300">{mods.length}</p></div>
       </div>
 
       <div className="apex-card p-5 mb-6 border-amber-400/20 bg-amber-400/5">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
-            <p className="text-amber-200 font-black text-sm">Steam Workshop catalogue unavailable for 7DTD</p>
-            <p className="text-slate-400 text-sm mt-1">Use Nexus Mods or manual ZIP upload/install next. Manual Steam Workshop IDs remain here for games that support Workshop properly.</p>
+            <p className="text-amber-200 font-black text-sm">Nexus note</p>
+            <p className="text-slate-400 text-sm mt-1">Nexus page URLs usually require login/manual download. Direct downloadable ZIP links work now; full Nexus API support can be added with an API key flow.</p>
           </div>
           <a href={NEXUS_7DTD_URL} target="_blank" rel="noreferrer" className="apex-button-muted shrink-0"><ExternalLink className="w-4 h-4" /> Open Nexus 7DTD</a>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <div className="apex-card p-4"><p className="text-xs text-slate-500 mb-1">Steam App ID</p><input value={appId} onChange={event => setAppId(event.target.value)} className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 font-mono outline-none focus:border-emerald-400/40" /></div>
-        <div className="apex-card p-4"><p className="text-xs text-slate-500 mb-1">Workshop cache path</p><p className="text-sm text-slate-200 font-mono truncate">{workshopRoot || 'Not created yet'}</p></div>
-        <div className="apex-card p-4"><p className="text-xs text-slate-500 mb-1">Server Mods folder</p><p className="text-sm text-slate-200 font-mono truncate">{modsPath || `${server.install_path}/Mods`}</p></div>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
+        <div className="apex-card p-5 space-y-4">
+          <div><p className="text-lg font-black text-slate-100">Install from URL</p><p className="text-sm text-slate-500 mt-1">Paste a direct ZIP URL. Nexus mod page URLs are stored/attempted, but may be blocked by Nexus auth.</p></div>
+          <input value={urlName} onChange={event => setUrlName(event.target.value)} placeholder="Optional mod name" className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400/40" />
+          <input value={url} onChange={event => setUrl(event.target.value)} placeholder="https://example.com/mod.zip or Nexus URL" className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400/40" />
+          <button onClick={installUrl} disabled={busy} className="apex-button-primary"><LinkIcon className="w-4 h-4" /> Install URL</button>
+        </div>
+
+        <div className="apex-card p-5 space-y-4">
+          <div><p className="text-lg font-black text-slate-100">Upload ZIP</p><p className="text-sm text-slate-500 mt-1">Upload a downloaded mod ZIP. The daemon extracts it and applies the detected mod folder.</p></div>
+          <input value={uploadName} onChange={event => setUploadName(event.target.value)} placeholder="Optional mod name" className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400/40" />
+          <input id="mod-upload-input" type="file" accept=".zip,application/zip" onChange={onFileChange} className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-500 file:px-3 file:py-1 file:text-sm file:font-bold file:text-slate-950" />
+          <button onClick={installUpload} disabled={busy || !uploadFile} className="apex-button-primary"><UploadCloud className="w-4 h-4" /> Upload + Install</button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-6">
-        <div className="space-y-6">
-          <div className="apex-card p-6 text-center border-dashed">
-            <UploadCloud className="w-12 h-12 text-slate-600 mx-auto mb-4" />
-            <p className="text-slate-200 font-black mb-2">Next: Nexus/manual ZIP mod installer</p>
-            <p className="text-slate-500 text-sm max-w-2xl mx-auto">This will let you paste a Nexus/manual download URL or upload a mod ZIP, extract it safely, detect the mod folder, and apply it to the server Mods directory.</p>
-          </div>
+      <div className="apex-card p-4 mb-6"><p className="text-xs text-slate-400">Direct API: <span className="text-slate-100 font-mono">{message || 'Ready'}</span></p></div>
 
-          <div className="apex-card p-4"><p className="text-xs text-slate-400">Direct API: <span className="text-slate-100 font-mono">{message || 'Ready'}</span></p></div>
-        </div>
-
-        <div className="apex-card overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
-            <div><p className="text-sm font-black text-slate-100">Manual Steam IDs</p><p className="text-xs text-slate-500">Kept for games with real Workshop support.</p></div>
-            <button onClick={() => setMods(prev => [...prev, emptyMod()])} className="apex-button-muted px-3 py-2 text-xs"><Plus className="w-4 h-4" /> Manual</button>
+      <div className="apex-card overflow-hidden">
+        <div className="px-5 py-4 border-b border-white/10"><p className="text-sm font-black text-slate-100">Installed Mods</p><p className="text-xs text-slate-500">Restart the game server after changing mods.</p></div>
+        {mods.length === 0 ? (
+          <div className="p-10 text-center text-slate-500 text-sm">No mods installed yet.</div>
+        ) : (
+          <div className="divide-y divide-white/10">
+            {mods.map(mod => (
+              <div key={mod.id} className="grid grid-cols-1 lg:grid-cols-[1fr_160px_180px_90px] gap-3 p-4 items-center hover:bg-white/[0.03]">
+                <div><p className="text-sm font-black text-slate-100">{mod.name}</p><p className="text-xs text-slate-500 font-mono truncate">{mod.folderName}</p>{mod.source && <p className="text-xs text-slate-600 truncate">{mod.source}</p>}</div>
+                <div><p className="text-xs text-slate-500">Source</p><p className="text-xs text-slate-300 capitalize">{mod.sourceType}</p></div>
+                <div><p className="text-xs text-slate-500">Installed</p><p className="text-xs text-slate-300">{formatDate(mod.installedAt)}</p></div>
+                <button onClick={() => removeInstalledMod(mod.id)} disabled={busy} className="inline-flex items-center justify-center rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-300 hover:bg-red-500/20"><Trash2 className="w-3.5 h-3.5" /> Remove</button>
+              </div>
+            ))}
           </div>
-          {mods.length === 0 ? (
-            <div className="p-8 text-center"><p className="text-slate-400 text-sm mb-4">No manual Workshop IDs added.</p><button onClick={() => setMods([emptyMod()])} className="apex-button-primary"><Plus className="w-4 h-4" /> Add manually</button></div>
-          ) : (
-            <div className="divide-y divide-white/10 max-h-[720px] overflow-y-auto">
-              {mods.map((mod, index) => (
-                <div key={`${mod.id}-${index}`} className="p-4 hover:bg-white/[0.03] space-y-3">
-                  <div className="grid grid-cols-[1fr_40px] gap-2"><input value={mod.id} onChange={event => updateMod(index, { id: event.target.value })} placeholder="Workshop ID" className="rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 font-mono outline-none focus:border-emerald-400/40" /><button onClick={() => removeMod(index)} className="inline-flex items-center justify-center rounded-xl border border-red-400/20 bg-red-500/10 text-red-300 hover:bg-red-500/20"><Trash2 className="w-3.5 h-3.5" /></button></div>
-                  <input value={mod.name || ''} onChange={event => updateMod(index, { name: event.target.value })} placeholder="Optional name" className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400/40" />
-                  <div className="flex items-center justify-between gap-3"><label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" checked={mod.enabled} onChange={event => updateMod(index, { enabled: event.target.checked })} /> Enabled</label><p className="text-xs text-slate-500 font-mono truncate">{mod.error || mod.status || 'Not installed'} • {formatDate(mod.appliedAt || mod.updatedAt)}</p></div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        )}
       </div>
     </div>
   )
