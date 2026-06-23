@@ -6,6 +6,7 @@ import { updateServerConfig } from './jobs/config.js'
 import { refreshServerStatus, restartServer, startServer, stopServer } from './jobs/manageServer.js'
 import { getServerLogs } from './jobs/serverConsole.js'
 import { getServerMetrics } from './jobs/serverMetrics.js'
+import { installModFromUpload, installModFromUrl, listMods, removeMod } from './jobs/modManager.js'
 import { listWorkshopMods, saveWorkshopMods, updateWorkshopMods } from './jobs/workshop.js'
 import { deleteSchedule, listSchedules, runScheduleNow, saveSchedule } from './scheduler.js'
 import { getServerTime } from './serverTime.js'
@@ -17,15 +18,11 @@ function readJson(req: http.IncomingMessage): Promise<Record<string, unknown>> {
     let body = ''
     req.on('data', chunk => {
       body += chunk
-      if (body.length > 1024 * 1024) reject(new Error('Request body too large'))
+      if (body.length > 64 * 1024 * 1024) reject(new Error('Request body too large'))
     })
     req.on('end', () => {
       if (!body.trim()) return resolve({})
-      try {
-        resolve(JSON.parse(body) as Record<string, unknown>)
-      } catch {
-        reject(new Error('Invalid JSON body'))
-      }
+      try { resolve(JSON.parse(body) as Record<string, unknown>) } catch { reject(new Error('Invalid JSON body')) }
     })
     req.on('error', reject)
   })
@@ -49,7 +46,6 @@ function isAuthed(req: http.IncomingMessage, config: DaemonConfig) {
 
 async function handleAction(req: http.IncomingMessage, res: http.ServerResponse, config: DaemonConfig, handler: ApiHandler) {
   if (!isAuthed(req, config)) return sendJson(res, 401, { success: false, error: 'Unauthorized' })
-
   try {
     const payload = await readJson(req)
     const result = await handler(payload)
@@ -62,12 +58,9 @@ async function handleAction(req: http.IncomingMessage, res: http.ServerResponse,
 export function startHttpApi(config: DaemonConfig, log: (message: string) => void) {
   const port = Number(process.env.APEXGSP_DAEMON_API_PORT || 8787)
   const host = process.env.APEXGSP_DAEMON_API_HOST || '127.0.0.1'
-
   const server = http.createServer(async (req, res) => {
     if (req.method === 'OPTIONS') return sendJson(res, 204, {})
-
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
-
     if (url.pathname === '/health') return sendJson(res, 200, { success: true, nodeId: config.nodeId })
     if (req.method !== 'POST') return sendJson(res, 405, { success: false, error: 'Method not allowed' })
 
@@ -88,6 +81,10 @@ export function startHttpApi(config: DaemonConfig, log: (message: string) => voi
       '/api/server/workshop/list': payload => listWorkshopMods(payload),
       '/api/server/workshop/save': payload => saveWorkshopMods(payload),
       '/api/server/workshop/update': payload => updateWorkshopMods(payload),
+      '/api/server/mods/list': payload => listMods(payload),
+      '/api/server/mods/install-url': payload => installModFromUrl(payload),
+      '/api/server/mods/install-upload': payload => installModFromUpload(payload),
+      '/api/server/mods/remove': payload => removeMod(payload),
       '/api/server/schedules/list': payload => listSchedules(payload),
       '/api/server/schedules/save': payload => saveSchedule(payload),
       '/api/server/schedules/delete': payload => deleteSchedule(payload),
@@ -99,7 +96,6 @@ export function startHttpApi(config: DaemonConfig, log: (message: string) => voi
     if (!handler) return sendJson(res, 404, { success: false, error: 'Not found' })
     return handleAction(req, res, config, handler)
   })
-
   server.listen(port, host, () => log(`Daemon HTTP API listening on ${host}:${port}`))
   server.on('error', error => log(`Daemon HTTP API failed: ${(error as Error).message}`))
   return server
