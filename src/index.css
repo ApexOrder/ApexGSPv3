@@ -3,22 +3,53 @@
 @tailwind utilities;
 
 @layer base {
+  html {
+    background: #020617;
+  }
+
+  body {
+    min-height: 100vh;
+    color: theme('colors.slate.100');
+    background:
+      radial-gradient(circle at 15% 10%, rgba(16, 185, 129, 0.16), transparent 28rem),
+      radial-gradient(circle at 85% 0%, rgba(34, 211, 238, 0.12), transparent 26rem),
+      #020617;
+  }
+
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
     background: theme('colors.slate.700');
-    border-radius: 3px;
+    border-radius: 999px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: theme('colors.slate.600');
+    background: theme('colors.emerald.500');
   }
   ::selection {
-    background: theme('colors.brand.600 / 40%');
-    color: theme('colors.brand.100');
+    background: theme('colors.emerald.500 / 35%');
+    color: white;
+  }
+}
+
+@layer components {
+  .apex-card {
+    @apply rounded-2xl border border-white/10 bg-slate-950/60 shadow-2xl shadow-black/25 backdrop-blur-xl;
+  }
+
+  .apex-card-hover {
+    @apply transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-400/30 hover:bg-slate-900/70;
+  }
+
+  .apex-button-primary {
+    @apply inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 px-4 py-2 text-sm font-bold text-slate-950 shadow-lg shadow-emerald-950/30 transition-all duration-200 hover:-translate-y-0.5 active:scale-[0.98];
+  }
+
+  .apex-button-muted {
+    @apply inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-300 transition-all duration-200 hover:border-emerald-400/30 hover:bg-emerald-400/10 hover:text-emerald-200;
   }
 }
