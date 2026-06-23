@@ -106,11 +106,24 @@ async function findTool(command: string, candidates: string[]) {
   return null
 }
 
+function tailText(value: string, max = 4000) {
+  const text = value || ''
+  return text.length > max ? text.slice(text.length - max) : text
+}
+
 async function installSteamGameServer(steamToolPath: string, installPath: string, profile: GameProfile) {
-  const args = ['+force_install_dir', installPath, '+login', 'anonymous']
+  const logDir = path.join(installPath, 'Logs')
+  const logFile = path.join(logDir, 'apexgsp-install.log')
+  await fs.mkdir(logDir, { recursive: true })
+
+  const args: string[] = []
   if (profile.steamPlatform === 'windows') args.push('+@sSteamCmdForcePlatformType', 'windows')
-  args.push('+app_update', profile.steamAppId, 'validate', '+quit')
-  return runCommand(steamToolPath, args, 45 * 60 * 1000)
+  args.push('+force_install_dir', installPath, '+login', 'anonymous', '+app_update', profile.steamAppId, 'validate', '+quit')
+
+  const result = await runCommand(steamToolPath, args, 45 * 60 * 1000)
+  const output = `${result.stdout || ''}\n${result.stderr || ''}\n${result.error || ''}`.trim()
+  await fs.writeFile(logFile, `${output}\n`, 'utf8')
+  return { ...result, logFile, outputTail: tailText(output) }
 }
 
 async function writeDayZDefaults(installPath: string, serverName: string) {
@@ -145,7 +158,9 @@ export async function createServer(payload: unknown, ctx?: JobContext) {
 
   await ctx?.reportProgress({ progress: 45, message: `Installing ${profile.displayName} dedicated server`, path: target.installPath, runtime: profile.runtime })
   const install = await installSteamGameServer(steamToolPath, target.installPath, profile)
-  if (!install.ok) throw new Error(`${profile.displayName} install failed: ${install.stderr || install.stdout || install.error}`)
+  if (!install.ok) {
+    throw new Error(`${profile.displayName} install failed. Full log: ${install.logFile}\n${install.outputTail}`)
+  }
 
   if (profile.id === 'dayz') await writeDayZDefaults(target.installPath, target.name)
   await ctx?.reportProgress({ progress: 85, message: `Verifying ${profile.displayName} installation`, path: target.installPath })
