@@ -67,7 +67,9 @@ function safeId(value: string) {
 
 function normaliseMods(input: WorkshopPayload, existing: WorkshopMod[] = []) {
   const byId = new Map(existing.map(mod => [mod.id, mod]))
-  const source = input.mods?.length ? input.mods : (input.modIds || []).map(id => ({ id, enabled: true }))
+  const source: WorkshopMod[] = input.mods?.length
+    ? input.mods
+    : (input.modIds || []).map(id => ({ id, name: '', enabled: true }))
 
   return source.map(raw => {
     const id = safeId(raw.id)
