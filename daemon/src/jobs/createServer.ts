@@ -13,6 +13,8 @@ type GameProfile = {
   executableNames: string[]
   folders: string[]
   defaultName: string
+  steamPlatform?: 'windows' | 'linux'
+  runtime?: 'native' | 'wine'
 }
 
 const GAME_PROFILES: GameProfile[] = [
@@ -24,15 +26,19 @@ const GAME_PROFILES: GameProfile[] = [
     executableNames: ['7DaysToDieServer.x86_64', '7DaysToDieServer.x86'],
     folders: ['Saves', 'Logs', 'Backups', 'Mods'],
     defaultName: '7 Days To Die Server',
+    steamPlatform: 'linux',
+    runtime: 'native',
   },
   {
     id: 'dayz',
     aliases: ['dayz', 'day-z', 'day_z'],
     displayName: 'DayZ',
     steamAppId: '223350',
-    executableNames: ['DayZServer', 'DayZServer_x64.exe', 'DayZServer.exe'],
+    executableNames: ['DayZServer_x64.exe', 'DayZServer.exe'],
     folders: ['profiles', 'mpmissions', 'keys', 'Logs', 'Backups', 'Mods'],
     defaultName: 'DayZ Server',
+    steamPlatform: 'windows',
+    runtime: 'wine',
   },
 ]
 
@@ -90,10 +96,10 @@ async function findServerExecutable(installPath: string, profile: GameProfile) {
   return null
 }
 
-async function findSteamToolPath() {
-  const which = await runCommand('which', ['steamcmd'])
+async function findTool(command: string, candidates: string[]) {
+  const which = await runCommand('which', [command])
   if (which.ok && which.stdout) return which.stdout.split('\n')[0]
-  for (const candidate of ['/usr/games/steamcmd', '/usr/bin/steamcmd', '/usr/local/bin/steamcmd']) {
+  for (const candidate of candidates) {
     const exists = await runCommand('test', ['-x', candidate])
     if (exists.ok) return candidate
   }
@@ -101,7 +107,10 @@ async function findSteamToolPath() {
 }
 
 async function installSteamGameServer(steamToolPath: string, installPath: string, profile: GameProfile) {
-  return runCommand(steamToolPath, ['+force_install_dir', installPath, '+login', 'anonymous', '+app_update', profile.steamAppId, 'validate', '+quit'], 45 * 60 * 1000)
+  const args = ['+force_install_dir', installPath, '+login', 'anonymous']
+  if (profile.steamPlatform === 'windows') args.push('+@sSteamCmdForcePlatformType', 'windows')
+  args.push('+app_update', profile.steamAppId, 'validate', '+quit')
+  return runCommand(steamToolPath, args, 45 * 60 * 1000)
 }
 
 async function writeDayZDefaults(installPath: string, serverName: string) {
@@ -123,22 +132,26 @@ export async function createServer(payload: unknown, ctx?: JobContext) {
   if (existingExecutable) {
     if (profile.id === 'dayz') await writeDayZDefaults(target.installPath, target.name)
     await ctx?.reportProgress({ progress: 100, message: `${profile.displayName} server already installed`, path: target.installPath, executablePath: existingExecutable })
-    return { message: `${profile.displayName} server already installed`, game: profile.id, appId: profile.steamAppId, installed: true, alreadyInstalled: true, executablePath: existingExecutable, ...target }
+    return { message: `${profile.displayName} server already installed`, game: profile.id, appId: profile.steamAppId, runtime: profile.runtime, steamPlatform: profile.steamPlatform, installed: true, alreadyInstalled: true, executablePath: existingExecutable, ...target }
   }
 
-  const steamToolPath = await findSteamToolPath()
+  const steamToolPath = await findTool('steamcmd', ['/usr/games/steamcmd', '/usr/bin/steamcmd', '/usr/local/bin/steamcmd'])
   if (!steamToolPath) throw new Error('SteamCMD is not installed. Run install_steamcmd first.')
-  await ctx?.reportProgress({ progress: 45, message: `Installing ${profile.displayName} dedicated server`, path: target.installPath })
 
+  if (profile.runtime === 'wine') {
+    const winePath = await findTool('wine', ['/usr/bin/wine', '/usr/local/bin/wine'])
+    if (!winePath) throw new Error(`${profile.displayName} requires Wine on Linux. Install wine64/wine before creating this server.`)
+  }
+
+  await ctx?.reportProgress({ progress: 45, message: `Installing ${profile.displayName} dedicated server`, path: target.installPath, runtime: profile.runtime })
   const install = await installSteamGameServer(steamToolPath, target.installPath, profile)
   if (!install.ok) throw new Error(`${profile.displayName} install failed: ${install.stderr || install.stdout || install.error}`)
 
   if (profile.id === 'dayz') await writeDayZDefaults(target.installPath, target.name)
   await ctx?.reportProgress({ progress: 85, message: `Verifying ${profile.displayName} installation`, path: target.installPath })
-
   const executablePath = await findServerExecutable(target.installPath, profile)
   if (!executablePath) throw new Error(`${profile.displayName} install finished but server executable was not found in ${target.installPath}`)
 
   await ctx?.reportProgress({ progress: 100, message: `${profile.displayName} server installed and verified`, path: target.installPath, executablePath })
-  return { message: `${profile.displayName} server installed and verified`, game: profile.id, appId: profile.steamAppId, installed: true, alreadyInstalled: false, executablePath, ...target }
+  return { message: `${profile.displayName} server installed and verified`, game: profile.id, appId: profile.steamAppId, runtime: profile.runtime, steamPlatform: profile.steamPlatform, installed: true, alreadyInstalled: false, executablePath, ...target }
 }
