@@ -29,19 +29,19 @@ type ServerWithNode = GameServer & {
 }
 
 const statusClass: Record<string, string> = {
-  running: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  running: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25',
   stopped: 'bg-slate-700/40 text-slate-300 border-slate-600/30',
-  starting: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  stopping: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-  installing: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
-  error: 'bg-red-500/10 text-red-400 border-red-500/20',
+  starting: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/25',
+  stopping: 'bg-amber-500/10 text-amber-300 border-amber-500/25',
+  installing: 'bg-purple-500/10 text-purple-300 border-purple-500/25',
+  error: 'bg-red-500/10 text-red-300 border-red-500/25',
 }
 
 const jobStatusClass: Record<JobStatus, string> = {
-  completed: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-  failed: 'bg-red-500/10 text-red-400 border-red-500/20',
-  running: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  pending: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  completed: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20',
+  failed: 'bg-red-500/10 text-red-300 border-red-500/20',
+  running: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20',
+  pending: 'bg-amber-500/10 text-amber-300 border-amber-500/20',
 }
 
 function getServerIdFromJob(job: ServerJob) {
@@ -168,17 +168,20 @@ export default function Servers() {
   }
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
+    <div className="relative p-8 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold text-slate-100 tracking-tight">Servers</h1>
+          <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs font-bold text-cyan-200 mb-3">
+            <Gamepad2 className="w-3.5 h-3.5" /> Server Fleet
+          </div>
+          <h1 className="text-3xl font-black text-slate-50 tracking-tight">Servers</h1>
           <p className="text-slate-400 text-sm mt-1">Manage game servers provisioned on your nodes</p>
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={refreshAll} className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors" title="Refresh">
+          <button onClick={refreshAll} className="apex-button-muted p-2" title="Refresh">
             <RefreshCw className="w-4 h-4" />
           </button>
-          <Link to="/servers/new" className="flex items-center gap-2 bg-brand-600 hover:bg-brand-500 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+          <Link to="/servers/new" className="apex-button-primary">
             <Plus className="w-4 h-4" />
             Create Server
           </Link>
@@ -187,59 +190,59 @@ export default function Servers() {
 
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <div className="inline-block w-6 h-6 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
+          <div className="inline-block w-7 h-7 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
         </div>
       ) : servers.length === 0 ? (
-        <div className="bg-slate-900 border border-slate-800 border-dashed rounded-xl p-16 text-center">
+        <div className="apex-card border-dashed p-16 text-center">
           <Gamepad2 className="w-12 h-12 text-slate-700 mx-auto mb-4" />
-          <p className="text-slate-300 font-semibold mb-2">No servers yet</p>
+          <p className="text-slate-300 font-bold mb-2">No servers yet</p>
           <p className="text-slate-500 text-sm mb-6">Create your first 7 Days To Die server to start managing it here.</p>
-          <Link to="/servers/new" className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-500 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+          <Link to="/servers/new" className="apex-button-primary">
             <Plus className="w-4 h-4" />
             Create Server
           </Link>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {servers.map(server => {
             const latestJob = latestJobByServerId[server.id]
             const jobBusy = latestJob?.status === 'pending' || latestJob?.status === 'running'
             const progress = latestJob ? getJobProgress(latestJob) : null
 
             return (
-              <div key={server.id} className="bg-slate-900 border border-slate-800 rounded-xl p-5 hover:border-slate-700 transition-colors">
+              <div key={server.id} className="apex-card apex-card-hover p-5">
                 <div className="flex items-start gap-4">
-                  <Link to={`/servers/${server.id}`} className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0 hover:border-brand-500/40 transition-colors">
-                    <Gamepad2 className="w-5 h-5 text-slate-400" />
+                  <Link to={`/servers/${server.id}`} className="relative w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-400/20 to-cyan-400/10 border border-emerald-400/20 flex items-center justify-center shrink-0 hover:border-emerald-400/40 transition-colors">
+                    <Gamepad2 className="w-5 h-5 text-emerald-300" />
                   </Link>
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-3 mb-1">
-                      <Link to={`/servers/${server.id}`} className="text-slate-100 hover:text-brand-300 font-semibold text-sm truncate inline-flex items-center gap-1.5 transition-colors">
+                      <Link to={`/servers/${server.id}`} className="text-slate-50 hover:text-emerald-300 font-black text-base truncate inline-flex items-center gap-1.5 transition-colors">
                         {server.name}
                         <ExternalLink className="w-3 h-3 text-slate-600" />
                       </Link>
-                      <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border capitalize', statusClass[server.status] ?? statusClass.stopped)}>
+                      <span className={cn('inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold border capitalize', statusClass[server.status] ?? statusClass.stopped)}>
                         {server.status}
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-2 lg:grid-cols-5 gap-x-6 gap-y-1.5 mt-2">
+                    <div className="grid grid-cols-2 lg:grid-cols-5 gap-x-6 gap-y-1.5 mt-3">
                       <div>
                         <p className="text-slate-600 text-xs">Game</p>
-                        <p className="text-slate-300 text-xs font-medium">7 Days To Die</p>
+                        <p className="text-slate-300 text-xs font-semibold">7 Days To Die</p>
                       </div>
                       <div>
                         <p className="text-slate-600 text-xs">Node</p>
-                        <p className="text-slate-300 text-xs font-medium truncate">{server.nodes?.name ?? 'Unknown'}</p>
+                        <p className="text-slate-300 text-xs font-semibold truncate">{server.nodes?.name ?? 'Unknown'}</p>
                       </div>
                       <div>
                         <p className="text-slate-600 text-xs">Node status</p>
-                        <p className="text-slate-300 text-xs font-medium capitalize">{server.nodes?.status ?? 'unknown'}</p>
+                        <p className="text-slate-300 text-xs font-semibold capitalize">{server.nodes?.status ?? 'unknown'}</p>
                       </div>
                       <div>
                         <p className="text-slate-600 text-xs">Created</p>
-                        <p className="text-slate-300 text-xs font-medium">{timeAgo(server.created_at)}</p>
+                        <p className="text-slate-300 text-xs font-semibold">{timeAgo(server.created_at)}</p>
                       </div>
                       <div>
                         <p className="text-slate-600 text-xs">Path</p>
@@ -248,10 +251,10 @@ export default function Servers() {
                     </div>
 
                     {latestJob && (
-                      <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2">
+                      <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3">
                         <div className="flex items-center justify-between gap-3">
                           <p className="text-xs text-slate-400">
-                            Latest job: <span className="text-slate-200 font-mono">{latestJob.type}</span>
+                            Latest job: <span className="text-slate-100 font-mono">{latestJob.type}</span>
                           </p>
                           <span className={cn('text-[11px] px-2 py-0.5 rounded-full border capitalize', jobStatusClass[latestJob.status])}>
                             {latestJob.status}
@@ -261,7 +264,7 @@ export default function Servers() {
                         {(progress !== null || jobBusy) && (
                           <div className="mt-2 h-1.5 bg-slate-800 rounded-full overflow-hidden">
                             <div
-                              className="h-full rounded-full bg-brand-500 transition-all duration-500"
+                              className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400 transition-all duration-500"
                               style={{ width: `${progress ?? (latestJob.status === 'pending' ? 12 : 50)}%` }}
                             />
                           </div>
@@ -274,7 +277,7 @@ export default function Servers() {
                     <button
                       onClick={() => queueServerJob(server, 'start_server')}
                       disabled={server.status === 'running' || sendingId !== null || jobBusy}
-                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-emerald-600/15 text-emerald-300 border border-emerald-500/20 hover:bg-emerald-600/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {sendingId === `${server.id}:start_server` ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
                       Start
@@ -282,7 +285,7 @@ export default function Servers() {
                     <button
                       onClick={() => queueServerJob(server, 'restart_server')}
                       disabled={sendingId !== null || jobBusy}
-                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-blue-600/15 text-blue-300 border border-blue-500/20 hover:bg-blue-600/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 hover:bg-cyan-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {sendingId === `${server.id}:restart_server` ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RotateCw className="w-3.5 h-3.5" />}
                       Restart
@@ -290,7 +293,7 @@ export default function Servers() {
                     <button
                       onClick={() => queueServerJob(server, 'stop_server')}
                       disabled={server.status === 'stopped' || sendingId !== null || jobBusy}
-                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-red-600/15 text-red-300 border border-red-500/20 hover:bg-red-600/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-red-500/10 text-red-300 border border-red-500/20 hover:bg-red-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {sendingId === `${server.id}:stop_server` ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Square className="w-3.5 h-3.5" />}
                       Stop
