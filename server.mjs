@@ -42,11 +42,7 @@ function readJson(req) {
     })
     req.on('end', () => {
       if (!body.trim()) return resolve({})
-      try {
-        resolve(JSON.parse(body))
-      } catch {
-        reject(new Error('Invalid JSON body'))
-      }
+      try { resolve(JSON.parse(body)) } catch { reject(new Error('Invalid JSON body')) }
     })
     req.on('error', reject)
   })
@@ -56,18 +52,10 @@ async function validateUser(req) {
   const authHeader = req.headers.authorization || ''
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : ''
   if (!token) return false
-
   const supabaseUrl = process.env.VITE_SUPABASE_URL
   const anonKey = process.env.VITE_SUPABASE_ANON_KEY
   if (!supabaseUrl || !anonKey) return false
-
-  const response = await fetch(`${supabaseUrl.replace(/\/$/, '')}/auth/v1/user`, {
-    headers: {
-      apikey: anonKey,
-      authorization: `Bearer ${token}`,
-    },
-  })
-
+  const response = await fetch(`${supabaseUrl.replace(/\/$/, '')}/auth/v1/user`, { headers: { apikey: anonKey, authorization: `Bearer ${token}` } })
   return response.ok
 }
 
@@ -77,7 +65,7 @@ function getDaemonEnv() {
 }
 
 function getDaemonPath(action) {
-  const backupActions = {
+  const directActions = {
     backup_list: '/api/server/backups/list',
     backup_create: '/api/server/backups/create',
     backup_delete: '/api/server/backups/delete',
@@ -93,15 +81,13 @@ function getDaemonPath(action) {
     schedule_run: '/api/server/schedules/run',
     schedule_time: '/api/server/schedules/time',
   }
-
-  if (backupActions[action]) return backupActions[action]
+  if (directActions[action]) return directActions[action]
   return `/api/server/${action}`
 }
 
 async function proxyDaemon(req, res, action) {
   const allowed = new Set(['status', 'start', 'stop', 'restart', 'logs', 'metrics', 'config', 'backup_list', 'backup_create', 'backup_delete', 'backup_restore', 'backup_restore_world', 'backup_restore_full', 'workshop_list', 'workshop_save', 'workshop_update', 'schedule_list', 'schedule_save', 'schedule_delete', 'schedule_run', 'schedule_time'])
   if (!allowed.has(action)) return sendJson(res, 404, { success: false, error: 'Unknown direct action' })
-
   if (!(await validateUser(req))) return sendJson(res, 401, { success: false, error: 'Unauthorized' })
 
   const payload = await readJson(req)
@@ -109,73 +95,67 @@ async function proxyDaemon(req, res, action) {
   const nodeId = daemonEnv.APEXGSP_NODE_ID || process.env.APEXGSP_NODE_ID
   const nodeSecret = daemonEnv.APEXGSP_NODE_SECRET || process.env.APEXGSP_NODE_SECRET
   const daemonUrl = process.env.APEXGSP_DAEMON_URL || 'http://127.0.0.1:8787'
-
   if (!nodeId || !nodeSecret) return sendJson(res, 500, { success: false, error: 'Daemon credentials missing on panel server' })
 
   const response = await fetch(`${daemonUrl.replace(/\/$/, '')}${getDaemonPath(action)}`, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-apexgsp-node-id': nodeId,
-      'x-apexgsp-node-secret': nodeSecret,
-    },
+    headers: { 'content-type': 'application/json', 'x-apexgsp-node-id': nodeId, 'x-apexgsp-node-secret': nodeSecret },
     body: JSON.stringify(payload),
   })
-
   const text = await response.text()
   res.writeHead(response.status, { 'content-type': response.headers.get('content-type') || 'application/json' })
   res.end(text)
 }
 
 function decodeHtml(value) {
-  return String(value || '')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .trim()
+  return String(value || '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim()
 }
 
 function parseWorkshopItems(html) {
-  const items = []
-  const seen = new Set()
-  const blockRegex = /<div[^>]+id="sharedfile_(\d+)"[\s\S]*?(?=<div[^>]+id="sharedfile_|<div[^>]+class="workshopBrowsePagingControls|$)/g
-  let match
-
-  while ((match = blockRegex.exec(html)) && items.length < 24) {
-    const block = match[0]
-    const id = match[1]
-    if (seen.has(id)) continue
-    seen.add(id)
-
-    const titleMatch = block.match(/class="workshopItemTitle"[^>]*>([\s\S]*?)<\/div>/)
-    const imageMatch = block.match(/<img[^>]+src="([^"]+)"/)
-    const authorMatch = block.match(/class="workshopItemAuthorName"[^>]*>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/)
-    const statsMatch = block.match(/class="workshopItemStats"[^>]*>([\s\S]*?)<\/div>/)
-
-    items.push({
-      id,
-      title: decodeHtml((titleMatch?.[1] || `Workshop ${id}`).replace(/<[^>]+>/g, '')),
-      image: imageMatch?.[1] || '',
-      author: decodeHtml((authorMatch?.[1] || '').replace(/<[^>]+>/g, '')),
-      stats: decodeHtml((statsMatch?.[1] || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')),
-      url: `https://steamcommunity.com/sharedfiles/filedetails/?id=${id}`,
-    })
+  const ids = new Set()
+  const patterns = [
+    /sharedfile_(\d+)/g,
+    /sharedfiles\/filedetails\/\?id=(\d+)/g,
+    /filedetails\/\?id=(\d+)/g,
+    /data-publishedfileid="(\d+)"/g,
+  ]
+  for (const pattern of patterns) {
+    let match
+    while ((match = pattern.exec(html)) && ids.size < 24) ids.add(match[1])
   }
+  return [...ids].map(id => ({ id, title: `Workshop ${id}`, image: '', author: '', stats: '', url: `https://steamcommunity.com/sharedfiles/filedetails/?id=${id}` }))
+}
 
-  return items
+async function getWorkshopDetails(ids) {
+  if (!ids.length) return []
+  const params = new URLSearchParams()
+  params.set('itemcount', String(ids.length))
+  ids.forEach((id, index) => params.set(`publishedfileids[${index}]`, id))
+  const response = await fetch('https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
+  })
+  if (!response.ok) return []
+  const data = await response.json().catch(() => null)
+  const details = data?.response?.publishedfiledetails || []
+  return details.map(item => ({
+    id: String(item.publishedfileid || ''),
+    title: decodeHtml(item.title || `Workshop ${item.publishedfileid}`),
+    image: item.preview_url || '',
+    author: item.creator ? `Creator ${item.creator}` : '',
+    stats: item.subscriptions ? `${item.subscriptions} subscribers` : '',
+    url: `https://steamcommunity.com/sharedfiles/filedetails/?id=${item.publishedfileid}`,
+  })).filter(item => item.id)
 }
 
 async function searchWorkshop(req, res) {
   if (!(await validateUser(req))) return sendJson(res, 401, { success: false, error: 'Unauthorized' })
-
   const payload = await readJson(req)
   const appId = String(payload.appId || '251570').replace(/\D/g, '') || '251570'
   const query = String(payload.query || '').trim()
   const sort = String(payload.sort || 'trend')
   const page = Math.max(1, Math.min(20, Number(payload.page || 1)))
-
   const steamUrl = new URL('https://steamcommunity.com/workshop/browse/')
   steamUrl.searchParams.set('appid', appId)
   steamUrl.searchParams.set('browsesort', sort)
@@ -184,46 +164,24 @@ async function searchWorkshop(req, res) {
   steamUrl.searchParams.set('p', String(page))
   if (query) steamUrl.searchParams.set('searchtext', query)
 
-  const response = await fetch(steamUrl, {
-    headers: {
-      'user-agent': 'Mozilla/5.0 ApexGSP Workshop Browser',
-      accept: 'text/html,application/xhtml+xml',
-    },
-  })
-
+  const response = await fetch(steamUrl, { headers: { 'user-agent': 'Mozilla/5.0 ApexGSP Workshop Browser', accept: 'text/html,application/xhtml+xml' } })
   if (!response.ok) return sendJson(res, response.status, { success: false, error: `Steam Workshop search failed: ${response.status}` })
-
   const html = await response.text()
-  return sendJson(res, 200, { success: true, result: { appId, query, sort, page, items: parseWorkshopItems(html) } })
+  const scraped = parseWorkshopItems(html)
+  const details = await getWorkshopDetails(scraped.map(item => item.id))
+  const items = details.length ? details : scraped
+  return sendJson(res, 200, { success: true, result: { appId, query, sort, page, items, debug: { scraped: scraped.length, detailed: details.length } } })
 }
 
-const mimeTypes = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.ico': 'image/x-icon',
-}
+const mimeTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.ico': 'image/x-icon' }
 
 function serveStatic(req, res) {
   const url = new URL(req.url || '/', 'http://localhost')
   const requested = decodeURIComponent(url.pathname)
   const safePath = requested === '/' ? '/index.html' : requested
   let filePath = path.resolve(distDir, `.${safePath}`)
-
-  if (!filePath.startsWith(`${distDir}${path.sep}`)) {
-    res.writeHead(403)
-    return res.end('Forbidden')
-  }
-
-  if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-    filePath = path.join(distDir, 'index.html')
-  }
-
+  if (!filePath.startsWith(`${distDir}${path.sep}`)) { res.writeHead(403); return res.end('Forbidden') }
+  if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) filePath = path.join(distDir, 'index.html')
   const ext = path.extname(filePath)
   res.writeHead(200, { 'content-type': mimeTypes[ext] || 'application/octet-stream' })
   fs.createReadStream(filePath).pipe(res)
@@ -232,27 +190,13 @@ function serveStatic(req, res) {
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || '/', 'http://localhost')
-
-    if (req.method === 'POST' && url.pathname.startsWith('/api/direct/')) {
-      const action = url.pathname.split('/').pop()
-      return proxyDaemon(req, res, action)
-    }
-
-    if (req.method === 'POST' && url.pathname === '/api/workshop/search') {
-      return searchWorkshop(req, res)
-    }
-
-    if (req.method !== 'GET' && req.method !== 'HEAD') {
-      res.writeHead(405)
-      return res.end('Method not allowed')
-    }
-
+    if (req.method === 'POST' && url.pathname.startsWith('/api/direct/')) return proxyDaemon(req, res, url.pathname.split('/').pop())
+    if (req.method === 'POST' && url.pathname === '/api/workshop/search') return searchWorkshop(req, res)
+    if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); return res.end('Method not allowed') }
     return serveStatic(req, res)
   } catch (error) {
     return sendJson(res, 500, { success: false, error: error.message })
   }
 })
 
-server.listen(port, host, () => {
-  console.log(`ApexGSP panel listening on http://${host}:${port}`)
-})
+server.listen(port, host, () => console.log(`ApexGSP panel listening on http://${host}:${port}`))
