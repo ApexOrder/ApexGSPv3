@@ -4,8 +4,37 @@ import { runCommand } from '../utils/exec.js'
 import type { JobContext } from './index.js'
 
 const DEFAULT_SERVERS_ROOT = '/opt/apexgsp/servers'
-const SERVER_EXECUTABLES = ['7DaysToDieServer.x86_64', '7DaysToDieServer.x86']
-const SEVEN_DAYS_APP_ID = '294420'
+
+type GameProfile = {
+  id: string
+  aliases: string[]
+  displayName: string
+  steamAppId: string
+  executableNames: string[]
+  folders: string[]
+  defaultName: string
+}
+
+const GAME_PROFILES: GameProfile[] = [
+  {
+    id: '7dtd',
+    aliases: ['7dtd', '7_days_to_die', '7-days-to-die'],
+    displayName: '7 Days To Die',
+    steamAppId: '294420',
+    executableNames: ['7DaysToDieServer.x86_64', '7DaysToDieServer.x86'],
+    folders: ['Saves', 'Logs', 'Backups', 'Mods'],
+    defaultName: '7 Days To Die Server',
+  },
+  {
+    id: 'dayz',
+    aliases: ['dayz', 'day-z', 'day_z'],
+    displayName: 'DayZ',
+    steamAppId: '223350',
+    executableNames: ['DayZServer', 'DayZServer_x64.exe', 'DayZServer.exe'],
+    folders: ['profiles', 'mpmissions', 'keys', 'Logs', 'Backups', 'Mods'],
+    defaultName: 'DayZ Server',
+  },
+]
 
 type CreateServerPayload = {
   game?: string
@@ -21,138 +50,95 @@ function readPayload(payload: unknown): CreateServerPayload {
   return payload as CreateServerPayload
 }
 
-function slugify(value: string) {
-  return value
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9-_]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
+function getProfile(game?: string) {
+  const value = (game || '7dtd').toLowerCase()
+  const profile = GAME_PROFILES.find(item => item.aliases.includes(value))
+  if (!profile) throw new Error(`Unsupported game for create_server: ${game}`)
+  return profile
 }
 
-function resolveInstallTarget(payload: CreateServerPayload) {
-  const name = payload.serverName || payload.name || '7 Days To Die Server'
+function slugify(value: string) {
+  return value.toLowerCase().trim().replace(/[^a-z0-9-_]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
+}
+
+function resolveInstallTarget(payload: CreateServerPayload, profile: GameProfile) {
+  const name = payload.serverName || payload.name || profile.defaultName
   const slug = slugify(payload.slug || name)
   if (!slug) throw new Error('Server name or slug must contain at least one letter or number')
-
   const root = path.resolve(process.env.APEXGSP_SERVERS_ROOT || DEFAULT_SERVERS_ROOT)
   const requestedPath = payload.installDir || payload.installPath
   const installPath = path.resolve(requestedPath || path.join(root, slug))
-
-  if (installPath !== root && !installPath.startsWith(`${root}${path.sep}`)) {
-    throw new Error(`Unsafe install path: server installs must stay inside ${root}`)
-  }
-
+  if (installPath !== root && !installPath.startsWith(`${root}${path.sep}`)) throw new Error(`Unsafe install path: server installs must stay inside ${root}`)
   return { name, slug, root, installPath }
 }
 
-async function createFolderLayout(root: string, installPath: string) {
+async function createFolderLayout(root: string, installPath: string, profile: GameProfile) {
   await fs.mkdir(root, { recursive: true })
   await fs.mkdir(installPath, { recursive: true })
-  await fs.mkdir(path.join(installPath, 'Saves'), { recursive: true })
-  await fs.mkdir(path.join(installPath, 'Logs'), { recursive: true })
-  await fs.mkdir(path.join(installPath, 'Backups'), { recursive: true })
+  for (const folder of profile.folders) await fs.mkdir(path.join(installPath, folder), { recursive: true })
 }
 
 async function pathExists(filePath: string) {
-  try {
-    await fs.access(filePath)
-    return true
-  } catch {
-    return false
-  }
+  try { await fs.access(filePath); return true } catch { return false }
 }
 
-async function findServerExecutable(installPath: string) {
-  for (const fileName of SERVER_EXECUTABLES) {
+async function findServerExecutable(installPath: string, profile: GameProfile) {
+  for (const fileName of profile.executableNames) {
     const executablePath = path.join(installPath, fileName)
     if (await pathExists(executablePath)) return executablePath
   }
-
   return null
 }
 
 async function findSteamToolPath() {
   const which = await runCommand('which', ['steamcmd'])
   if (which.ok && which.stdout) return which.stdout.split('\n')[0]
-
   for (const candidate of ['/usr/games/steamcmd', '/usr/bin/steamcmd', '/usr/local/bin/steamcmd']) {
     const exists = await runCommand('test', ['-x', candidate])
     if (exists.ok) return candidate
   }
-
   return null
 }
 
-async function installSevenDaysServer(steamToolPath: string, installPath: string) {
-  const args = [
-    '+force_install_dir',
-    installPath,
-    '+login',
-    'anonymous',
-    '+app_update',
-    SEVEN_DAYS_APP_ID,
-    'validate',
-    '+quit',
-  ]
+async function installSteamGameServer(steamToolPath: string, installPath: string, profile: GameProfile) {
+  return runCommand(steamToolPath, ['+force_install_dir', installPath, '+login', 'anonymous', '+app_update', profile.steamAppId, 'validate', '+quit'], 45 * 60 * 1000)
+}
 
-  return runCommand(steamToolPath, args, 30 * 60 * 1000)
+async function writeDayZDefaults(installPath: string, serverName: string) {
+  const configPath = path.join(installPath, 'serverDZ.cfg')
+  if (await pathExists(configPath)) return
+  await fs.writeFile(configPath, `hostname = "${serverName.replace(/"/g, '')}";\npassword = "";\npasswordAdmin = "changeme";\nmaxPlayers = 60;\nverifySignatures = 2;\nforceSameBuild = 1;\ndisableVoN = 0;\nvonCodecQuality = 20;\ndisable3rdPerson = 0;\ndisableCrosshair = 0;\nserverTime = "SystemTime";\nserverTimeAcceleration = 1;\nserverNightTimeAcceleration = 1;\nguaranteedUpdates = 1;\nloginQueueConcurrentPlayers = 5;\nloginQueueMaxPlayers = 500;\ninstanceId = 1;\nstorageAutoFix = 1;\nclass Missions {\n  class DayZ {\n    template = "dayzOffline.chernarusplus";\n  };\n};\n`, 'utf8')
 }
 
 export async function createServer(payload: unknown, ctx?: JobContext) {
   const input = readPayload(payload)
-  const game = input.game || '7dtd'
+  const profile = getProfile(input.game)
+  const target = resolveInstallTarget(input, profile)
 
-  if (!['7dtd', '7_days_to_die', '7-days-to-die'].includes(game)) {
-    throw new Error(`Unsupported game for create_server: ${game}`)
-  }
-
-  const target = resolveInstallTarget(input)
-
-  await ctx?.reportProgress({ progress: 20, message: 'create_server request validated', game: '7dtd', path: target.installPath })
+  await ctx?.reportProgress({ progress: 20, message: 'create_server request validated', game: profile.id, path: target.installPath })
   await ctx?.reportProgress({ progress: 35, message: 'Creating server folder layout', path: target.installPath })
+  await createFolderLayout(target.root, target.installPath, profile)
 
-  await createFolderLayout(target.root, target.installPath)
-
-  const existingExecutable = await findServerExecutable(target.installPath)
+  const existingExecutable = await findServerExecutable(target.installPath, profile)
   if (existingExecutable) {
-    await ctx?.reportProgress({ progress: 100, message: '7 Days To Die server already installed', path: target.installPath, executablePath: existingExecutable })
-
-    return {
-      message: '7 Days To Die server already installed',
-      game: '7dtd',
-      appId: SEVEN_DAYS_APP_ID,
-      installed: true,
-      alreadyInstalled: true,
-      executablePath: existingExecutable,
-      ...target,
-    }
+    if (profile.id === 'dayz') await writeDayZDefaults(target.installPath, target.name)
+    await ctx?.reportProgress({ progress: 100, message: `${profile.displayName} server already installed`, path: target.installPath, executablePath: existingExecutable })
+    return { message: `${profile.displayName} server already installed`, game: profile.id, appId: profile.steamAppId, installed: true, alreadyInstalled: true, executablePath: existingExecutable, ...target }
   }
 
   const steamToolPath = await findSteamToolPath()
   if (!steamToolPath) throw new Error('SteamCMD is not installed. Run install_steamcmd first.')
+  await ctx?.reportProgress({ progress: 45, message: `Installing ${profile.displayName} dedicated server`, path: target.installPath })
 
-  await ctx?.reportProgress({ progress: 45, message: 'Installing 7 Days To Die dedicated server', path: target.installPath })
+  const install = await installSteamGameServer(steamToolPath, target.installPath, profile)
+  if (!install.ok) throw new Error(`${profile.displayName} install failed: ${install.stderr || install.stdout || install.error}`)
 
-  const install = await installSevenDaysServer(steamToolPath, target.installPath)
-  if (!install.ok) {
-    throw new Error(`7 Days To Die install failed: ${install.stderr || install.stdout || install.error}`)
-  }
+  if (profile.id === 'dayz') await writeDayZDefaults(target.installPath, target.name)
+  await ctx?.reportProgress({ progress: 85, message: `Verifying ${profile.displayName} installation`, path: target.installPath })
 
-  await ctx?.reportProgress({ progress: 85, message: 'Verifying 7 Days To Die installation', path: target.installPath })
+  const executablePath = await findServerExecutable(target.installPath, profile)
+  if (!executablePath) throw new Error(`${profile.displayName} install finished but server executable was not found in ${target.installPath}`)
 
-  const executablePath = await findServerExecutable(target.installPath)
-  if (!executablePath) throw new Error(`7 Days To Die install finished but server executable was not found in ${target.installPath}`)
-
-  await ctx?.reportProgress({ progress: 100, message: '7 Days To Die server installed and verified', path: target.installPath, executablePath })
-
-  return {
-    message: '7 Days To Die server installed and verified',
-    game: '7dtd',
-    appId: SEVEN_DAYS_APP_ID,
-    installed: true,
-    alreadyInstalled: false,
-    executablePath,
-    ...target,
-  }
+  await ctx?.reportProgress({ progress: 100, message: `${profile.displayName} server installed and verified`, path: target.installPath, executablePath })
+  return { message: `${profile.displayName} server installed and verified`, game: profile.id, appId: profile.steamAppId, installed: true, alreadyInstalled: false, executablePath, ...target }
 }
