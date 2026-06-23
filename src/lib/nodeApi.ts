@@ -1,6 +1,6 @@
 import type { Session } from '@supabase/supabase-js'
 
-export type NodeAction = 'status' | 'start' | 'stop' | 'restart' | 'logs' | 'metrics' | 'config' | 'backup_list' | 'backup_create' | 'backup_delete' | 'backup_restore' | 'backup_restore_world' | 'backup_restore_full' | 'workshop_list' | 'workshop_save' | 'workshop_update' | 'schedule_list' | 'schedule_save' | 'schedule_run' | 'schedule_delete' | 'schedule_time'
+export type NodeAction = 'status' | 'start' | 'stop' | 'restart' | 'logs' | 'metrics' | 'config' | 'backup_list' | 'backup_create' | 'backup_delete' | 'backup_restore' | 'backup_restore_world' | 'backup_restore_full' | 'workshop_list' | 'workshop_save' | 'workshop_update' | 'mods_list' | 'mods_install_url' | 'mods_install_upload' | 'mods_remove' | 'schedule_list' | 'schedule_save' | 'schedule_run' | 'schedule_delete' | 'schedule_time'
 
 export async function callNodeApi<T>(session: Session | null, action: NodeAction, payload: Record<string, unknown>): Promise<T> {
   if (!session?.access_token) throw new Error('Not authenticated')
