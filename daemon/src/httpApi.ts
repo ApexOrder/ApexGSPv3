@@ -6,6 +6,7 @@ import { updateServerConfig } from './jobs/config.js'
 import { refreshServerStatus, restartServer, startServer, stopServer } from './jobs/manageServer.js'
 import { getServerLogs } from './jobs/serverConsole.js'
 import { getServerMetrics } from './jobs/serverMetrics.js'
+import { listWorkshopMods, saveWorkshopMods, updateWorkshopMods } from './jobs/workshop.js'
 import { deleteSchedule, listSchedules, runScheduleNow, saveSchedule } from './scheduler.js'
 import { getServerTime } from './serverTime.js'
 
@@ -84,6 +85,9 @@ export function startHttpApi(config: DaemonConfig, log: (message: string) => voi
       '/api/server/backups/restore': payload => restoreBackup(payload),
       '/api/server/backups/restore/world': payload => restoreBackup({ ...payload, backupMode: 'world' }),
       '/api/server/backups/restore/full': payload => restoreBackup({ ...payload, backupMode: 'full' }),
+      '/api/server/workshop/list': payload => listWorkshopMods(payload),
+      '/api/server/workshop/save': payload => saveWorkshopMods(payload),
+      '/api/server/workshop/update': payload => updateWorkshopMods(payload),
       '/api/server/schedules/list': payload => listSchedules(payload),
       '/api/server/schedules/save': payload => saveSchedule(payload),
       '/api/server/schedules/delete': payload => deleteSchedule(payload),
