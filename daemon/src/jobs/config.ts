@@ -6,6 +6,7 @@ type ConfigPayload = {
   server_id?: string
   installPath?: string
   install_path?: string
+  game?: string
   settings?: Record<string, unknown>
 }
 
@@ -16,7 +17,7 @@ function readPayload(payload: unknown) {
   const installPath = input.installPath || input.install_path
   if (!serverId) throw new Error('Missing server_id')
   if (!installPath) throw new Error('Missing installPath')
-  return { serverId, installPath, settings: input.settings || {} }
+  return { serverId, installPath, game: (input.game || '7dtd').toLowerCase(), settings: input.settings || {} }
 }
 
 function safeInstallPath(value: string) {
@@ -37,20 +38,25 @@ function intText(value: unknown, fallback: number, min: number, max: number) {
   return String(Math.min(max, Math.max(min, Math.round(parsed))))
 }
 
+function boolText(value: unknown, fallback: boolean) {
+  if (typeof value === 'boolean') return value ? '1' : '0'
+  if (typeof value === 'string') return ['true', '1', 'yes', 'on'].includes(value.toLowerCase()) ? '1' : ['false', '0', 'no', 'off'].includes(value.toLowerCase()) ? '0' : fallback ? '1' : '0'
+  return fallback ? '1' : '0'
+}
+
 function escapeXml(value: string) {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&apos;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
+  return value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll("'", '&apos;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+}
+
+function escapeCfg(value: string) {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 }
 
 function property(name: string, value: string) {
   return `  <property name="${name}" value="${escapeXml(value)}" />`
 }
 
-function buildConfig(settings: Record<string, unknown>) {
+function build7dtdConfig(settings: Record<string, unknown>) {
   const serverName = text(settings.serverName, 'ApexGSP 7DTD Server')
   const serverPassword = text(settings.serverPassword, '')
   const adminFileName = text(settings.adminFileName, 'serveradmin.xml')
@@ -91,23 +97,61 @@ function buildConfig(settings: Record<string, unknown>) {
   ].join('\n')
 }
 
+function buildDayzConfig(settings: Record<string, unknown>) {
+  const hostname = text(settings.serverName, 'ApexGSP DayZ Server')
+  const serverPassword = text(settings.serverPassword, '')
+  const adminPassword = text(settings.adminPassword, 'changeme')
+  const maxPlayers = intText(settings.maxPlayers, 60, 1, 127)
+  const port = intText(settings.serverPort, 2302, 1024, 65535)
+  const mission = text(settings.mission, 'dayzOffline.chernarusplus')
+  const instanceId = intText(settings.instanceId, 1, 1, 9999)
+  const thirdPerson = boolText(settings.thirdPerson, true)
+  const crosshair = boolText(settings.crosshair, false)
+  const von = boolText(settings.vonEnabled, true)
+  const timeAcceleration = intText(settings.timeAcceleration, 1, 1, 64)
+  const nightAcceleration = intText(settings.nightAcceleration, 1, 1, 64)
+
+  return [
+    `hostname = "${escapeCfg(hostname)}";`,
+    `password = "${escapeCfg(serverPassword)}";`,
+    `passwordAdmin = "${escapeCfg(adminPassword)}";`,
+    `maxPlayers = ${maxPlayers};`,
+    `serverPort = ${port};`,
+    'verifySignatures = 2;',
+    'forceSameBuild = 1;',
+    `disableVoN = ${von === '1' ? '0' : '1'};`,
+    'vonCodecQuality = 20;',
+    `disable3rdPerson = ${thirdPerson === '1' ? '0' : '1'};`,
+    `disableCrosshair = ${crosshair === '1' ? '0' : '1'};`,
+    'serverTime = "SystemTime";',
+    `serverTimeAcceleration = ${timeAcceleration};`,
+    `serverNightTimeAcceleration = ${nightAcceleration};`,
+    'guaranteedUpdates = 1;',
+    'loginQueueConcurrentPlayers = 5;',
+    'loginQueueMaxPlayers = 500;',
+    `instanceId = ${instanceId};`,
+    'storageAutoFix = 1;',
+    'class Missions {',
+    '  class DayZ {',
+    `    template = "${escapeCfg(mission)}";`,
+    '  };',
+    '};',
+    '',
+  ].join('\n')
+}
+
 export async function updateServerConfig(payload: unknown, ctx?: JobContext) {
   const input = readPayload(payload)
   const installPath = safeInstallPath(input.installPath)
-  const configPath = path.join(installPath, 'serverconfig.xml')
+  const isDayz = input.game === 'dayz'
+  const configPath = path.join(installPath, isDayz ? 'serverDZ.cfg' : 'serverconfig.xml')
 
-  await ctx?.reportProgress({ progress: 25, message: 'Building server configuration', serverId: input.serverId })
+  await ctx?.reportProgress({ progress: 25, message: 'Building server configuration', serverId: input.serverId, game: input.game })
 
-  const config = buildConfig(input.settings)
+  const config = isDayz ? buildDayzConfig(input.settings) : build7dtdConfig(input.settings)
   await fs.writeFile(configPath, config, 'utf8')
 
   await ctx?.reportProgress({ progress: 100, message: 'Server configuration saved', serverId: input.serverId, configPath })
 
-  return {
-    message: 'Server configuration saved',
-    serverId: input.serverId,
-    status: 'config_saved',
-    configPath,
-    settings: input.settings,
-  }
+  return { message: 'Server configuration saved', serverId: input.serverId, status: 'config_saved', configPath, settings: input.settings }
 }
