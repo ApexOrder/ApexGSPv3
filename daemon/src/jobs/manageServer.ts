@@ -14,18 +14,22 @@ type ServerJobPayload = {
   install_path?: string
   executablePath?: string | null
   executable_path?: string | null
+  settings?: Record<string, unknown> | null
+  ports?: Record<string, unknown> | null
 }
 
 type RuntimeProfile = {
   game: string
   executableNames: string[]
   command: 'native' | 'wine'
-  args: string[]
+  args: (input: ServerJobPayload) => string[]
   processPattern: string
 }
 
 function sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)) }
 function gameId(value?: string) { return String(value || '7dtd').toLowerCase() }
+function numberValue(value: unknown, fallback: number) { const parsed = Number(value); return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : fallback }
+function payloadPort(input: ServerJobPayload, fallback: number) { return numberValue(input.settings?.serverPort ?? input.ports?.game, fallback) }
 
 function runtimeProfile(game?: string): RuntimeProfile {
   const id = gameId(game)
@@ -33,14 +37,14 @@ function runtimeProfile(game?: string): RuntimeProfile {
     game: 'dayz',
     executableNames: ['DayZServer_x64.exe', 'DayZServer.exe'],
     command: 'wine',
-    args: ['-config=serverDZ.cfg', '-profiles=profiles', '-port=2302', '-dologs', '-adminlog', '-netlog', '-freezecheck'],
+    args: input => ['-config=serverDZ.cfg', '-profiles=profiles', `-port=${payloadPort(input, 2302)}`, '-dologs', '-adminlog', '-netlog', '-freezecheck'],
     processPattern: 'DayZServer',
   }
   return {
     game: '7dtd',
     executableNames: ['7DaysToDieServer.x86_64', '7DaysToDieServer.x86'],
     command: 'native',
-    args: ['-quit', '-batchmode', '-nographics', '-configfile=serverconfig.xml'],
+    args: () => ['-quit', '-batchmode', '-nographics', '-configfile=serverconfig.xml'],
     processPattern: '7DaysToDieServer',
   }
 }
@@ -76,29 +80,14 @@ async function findExecutable(installPath: string, profile: RuntimeProfile, payl
 async function findTool(command: string, candidates: string[]) {
   const which = await runCommand('which', [command])
   if (which.ok && which.stdout) return which.stdout.split('\n')[0]
-  for (const candidate of candidates) {
-    const exists = await runCommand('test', ['-x', candidate])
-    if (exists.ok) return candidate
-  }
+  for (const candidate of candidates) { const exists = await runCommand('test', ['-x', candidate]); if (exists.ok) return candidate }
   return null
 }
 
-async function readPid(pidFile: string) {
-  try { const value = await fs.readFile(pidFile, 'utf8'); const pid = Number(value.trim()); return Number.isFinite(pid) && pid > 0 ? pid : null } catch { return null }
-}
-
+async function readPid(pidFile: string) { try { const value = await fs.readFile(pidFile, 'utf8'); const pid = Number(value.trim()); return Number.isFinite(pid) && pid > 0 ? pid : null } catch { return null } }
 async function isProcessRunning(pid: number) { const result = await runCommand('kill', ['-0', String(pid)]); return result.ok }
-
-async function findRuntimePid(installPath: string, profile: RuntimeProfile) {
-  const result = await runCommand('pgrep', ['-f', `${installPath}.+${profile.processPattern}`])
-  if (!result.ok) return null
-  const pid = Number(result.stdout.trim().split(/\s+/)[0])
-  return Number.isFinite(pid) && pid > 0 ? pid : null
-}
-
-async function getTail(filePath: string, lines = 60) {
-  try { const result = await runCommand('tail', ['-n', String(lines), filePath]); return result.stdout || result.stderr || '' } catch { return '' }
-}
+async function findRuntimePid(installPath: string, profile: RuntimeProfile) { const result = await runCommand('pgrep', ['-f', `${installPath}.+${profile.processPattern}`]); if (!result.ok) return null; const pid = Number(result.stdout.trim().split(/\s+/)[0]); return Number.isFinite(pid) && pid > 0 ? pid : null }
+async function getTail(filePath: string, lines = 60) { try { const result = await runCommand('tail', ['-n', String(lines), filePath]); return result.stdout || result.stderr || '' } catch { return '' } }
 
 async function stopPid(pid: number) {
   await runCommand('kill', [String(pid)])
@@ -107,9 +96,10 @@ async function stopPid(pid: number) {
   return !(await isProcessRunning(pid))
 }
 
-function startCommand(profile: RuntimeProfile, executable: string) {
-  if (profile.command === 'wine') return { command: 'wine', args: [executable, ...profile.args] }
-  return { command: executable, args: profile.args }
+function startCommand(profile: RuntimeProfile, executable: string, input: ServerJobPayload) {
+  const args = profile.args(input)
+  if (profile.command === 'wine') return { command: 'wine', args: [executable, ...args] }
+  return { command: executable, args }
 }
 
 export async function refreshServerStatus(payload: unknown, ctx?: JobContext) {
@@ -148,15 +138,12 @@ export async function startServer(payload: unknown, ctx?: JobContext) {
   }
   const executable = await findExecutable(installPath, profile, input.executablePath || input.executable_path)
   if (!executable) throw new Error(`Server executable not found in ${installPath}`)
-  if (profile.command === 'wine') {
-    const wine = await findTool('wine', ['/usr/bin/wine', '/usr/local/bin/wine'])
-    if (!wine) throw new Error('Wine is not installed. Install wine64 before starting this server.')
-  }
+  if (profile.command === 'wine') { const wine = await findTool('wine', ['/usr/bin/wine', '/usr/local/bin/wine']); if (!wine) throw new Error('Wine is not installed. Install wine64 before starting this server.') }
   await fs.mkdir(logDir, { recursive: true })
-  await ctx?.reportProgress({ progress: 35, message: `Starting ${profile.game} server process`, serverId: input.server_id, game: profile.game })
+  const command = startCommand(profile, executable, input)
+  await ctx?.reportProgress({ progress: 35, message: `Starting ${profile.game} server process`, serverId: input.server_id, game: profile.game, command: command.args.join(' ') })
   const out = fsSync.openSync(logFile, 'a')
   const err = fsSync.openSync(logFile, 'a')
-  const command = startCommand(profile, executable)
   const child = spawn(command.command, command.args, { cwd: installPath, detached: true, stdio: ['ignore', out, err], env: { ...process.env, LD_LIBRARY_PATH: installPath, WINEDEBUG: process.env.WINEDEBUG || '-all' } })
   child.unref()
   fsSync.closeSync(out)
