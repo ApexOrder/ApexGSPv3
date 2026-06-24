@@ -21,7 +21,7 @@ type ServerJobPayload = {
 type RuntimeProfile = {
   game: string
   executableNames: string[]
-  command: 'native' | 'wine'
+  command: 'native' | 'wine-xvfb'
   args: (input: ServerJobPayload) => string[]
   processPattern: string
 }
@@ -36,7 +36,7 @@ function runtimeProfile(game?: string): RuntimeProfile {
   if (id === 'dayz') return {
     game: 'dayz',
     executableNames: ['DayZServer_x64.exe', 'DayZServer.exe'],
-    command: 'wine',
+    command: 'wine-xvfb',
     args: input => ['-config=serverDZ.cfg', '-profiles=profiles', `-port=${payloadPort(input, 2302)}`, '-dologs', '-adminlog', '-netlog', '-freezecheck'],
     processPattern: 'DayZServer',
   }
@@ -91,14 +91,14 @@ async function getTail(filePath: string, lines = 60) { try { const result = awai
 
 async function stopPid(pid: number) {
   await runCommand('kill', [String(pid)])
-  for (let i = 0; i < 12; i += 1) { await sleep(1000); if (!(await isProcessRunning(pid))) return true }
+  for (let i = 0; i < 5; i += 1) { await sleep(1000); if (!(await isProcessRunning(pid))) return true }
   await runCommand('kill', ['-9', String(pid)])
   return !(await isProcessRunning(pid))
 }
 
 function startCommand(profile: RuntimeProfile, executable: string, input: ServerJobPayload) {
   const args = profile.args(input)
-  if (profile.command === 'wine') return { command: 'wine', args: [executable, ...args] }
+  if (profile.command === 'wine-xvfb') return { command: 'xvfb-run', args: ['-a', 'wine', executable, ...args] }
   return { command: executable, args }
 }
 
@@ -138,7 +138,12 @@ export async function startServer(payload: unknown, ctx?: JobContext) {
   }
   const executable = await findExecutable(installPath, profile, input.executablePath || input.executable_path)
   if (!executable) throw new Error(`Server executable not found in ${installPath}`)
-  if (profile.command === 'wine') { const wine = await findTool('wine', ['/usr/bin/wine', '/usr/local/bin/wine']); if (!wine) throw new Error('Wine is not installed. Install wine64 before starting this server.') }
+  if (profile.command === 'wine-xvfb') {
+    const wine = await findTool('wine', ['/usr/bin/wine', '/usr/local/bin/wine'])
+    const xvfb = await findTool('xvfb-run', ['/usr/bin/xvfb-run', '/usr/local/bin/xvfb-run'])
+    if (!wine) throw new Error('Wine is not installed. Install wine64 before starting this server.')
+    if (!xvfb) throw new Error('xvfb-run is not installed. Install xvfb before starting this server.')
+  }
   await fs.mkdir(logDir, { recursive: true })
   const command = startCommand(profile, executable, input)
   await ctx?.reportProgress({ progress: 35, message: `Starting ${profile.game} server process`, serverId: input.server_id, game: profile.game, command: command.args.join(' ') })
