@@ -4,6 +4,7 @@ import { completeJob, fetchNextJob, registerNode, reportJobProgress, sendHeartbe
 import { startHttpApi } from './httpApi.js'
 import { runJob } from './jobs/index.js'
 import { startScheduler } from './scheduler.js'
+import { collectServerStatuses } from './statusSync.js'
 
 const DAEMON_VERSION = '0.1.0-ts'
 
@@ -43,7 +44,8 @@ async function heartbeatLoop() {
     const config = loadConfig()
 
     try {
-      await sendHeartbeat(config, DAEMON_VERSION, { hostname: os.hostname() })
+      const serverStatuses = await collectServerStatuses()
+      await sendHeartbeat(config, DAEMON_VERSION, { hostname: os.hostname(), serverStatuses })
       log('Heartbeat sent.')
     } catch (error) {
       log(`Heartbeat failed: ${(error as Error).message}`)
