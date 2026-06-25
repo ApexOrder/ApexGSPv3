@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { Gamepad2, Plus, RefreshCw, Play, Square, RotateCw, ExternalLink } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
-import { cn, timeAgo } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { getGameMeta } from '@/lib/games'
 import { getServerConnection } from '@/lib/serverConnection'
 import type { GameServer } from '@/lib/types'
@@ -91,13 +91,11 @@ export default function Servers() {
                   <Link to={`/servers/${server.id}`} className="relative w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-400/20 to-cyan-400/10 border border-emerald-400/20 flex items-center justify-center shrink-0 hover:border-emerald-400/40 transition-colors"><Gamepad2 className="w-5 h-5 text-emerald-300" /></Link>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-3 mb-1"><Link to={`/servers/${server.id}`} className="text-slate-50 hover:text-emerald-300 font-black text-base truncate inline-flex items-center gap-1.5 transition-colors">{server.name}<ExternalLink className="w-3 h-3 text-slate-600" /></Link><span className={cn('inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold border capitalize', statusClass[server.status] ?? statusClass.stopped)}>{server.status}</span></div>
-                    <div className="grid grid-cols-2 lg:grid-cols-6 gap-x-6 gap-y-1.5 mt-3">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-1.5 mt-3">
                       <Info label="Game" value={game.label} />
                       <Info label="Connect" value={getServerConnection(server)} mono />
                       <Info label="Node" value={server.nodes?.name ?? 'Unknown'} />
                       <Info label="Node status" value={server.nodes?.status ?? 'unknown'} />
-                      <Info label="Created" value={timeAgo(server.created_at)} />
-                      <Info label="Path" value={server.install_path} mono />
                     </div>
                     {latestJob && <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3"><div className="flex items-center justify-between gap-3"><p className="text-xs text-slate-400">Latest job: <span className="text-slate-100 font-mono">{latestJob.type}</span></p><span className={cn('text-[11px] px-2 py-0.5 rounded-full border capitalize', jobStatusClass[latestJob.status])}>{latestJob.status}</span></div><p className="text-xs text-slate-500 mt-1 font-mono truncate">{getJobMessage(latestJob)}</p>{(progress !== null || jobBusy) && <div className="mt-2 h-1.5 bg-slate-800 rounded-full overflow-hidden"><div className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400 transition-all duration-500" style={{ width: `${progress ?? (latestJob.status === 'pending' ? 12 : 50)}%` }} /></div>}</div>}
                   </div>
