@@ -5,12 +5,13 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { cn, timeAgo } from '@/lib/utils'
 import { getGameMeta } from '@/lib/games'
+import { getServerConnection } from '@/lib/serverConnection'
 import type { GameServer } from '@/lib/types'
 
 type JobAction = 'start_server' | 'stop_server' | 'restart_server'
 type JobStatus = 'pending' | 'running' | 'completed' | 'failed'
 type ServerJob = { id: string; node_id: string; type: string; status: JobStatus; payload: Record<string, unknown> | null; result: Record<string, unknown> | null; error: string | null; created_at: string; updated_at: string }
-type ServerWithNode = GameServer & { nodes?: { name: string | null; status: string | null } | null }
+type ServerWithNode = GameServer & { nodes?: { name: string | null; status: string | null; hostname: string | null; ip_address: string | null } | null }
 
 const statusClass: Record<string, string> = {
   running: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25', stopped: 'bg-slate-700/40 text-slate-300 border-slate-600/30', starting: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/25', stopping: 'bg-amber-500/10 text-amber-300 border-amber-500/25', installing: 'bg-purple-500/10 text-purple-300 border-purple-500/25', error: 'bg-red-500/10 text-red-300 border-red-500/25',
@@ -36,7 +37,7 @@ export default function Servers() {
 
   async function fetchServers() {
     if (!user) return
-    const { data, error } = await supabase.from('servers').select('*, nodes(name, status)').eq('user_id', user.id).order('created_at', { ascending: false })
+    const { data, error } = await supabase.from('servers').select('*, nodes(name, status, hostname, ip_address)').eq('user_id', user.id).order('created_at', { ascending: false })
     if (error) { console.error(error); setLoading(false); return }
     setServers((data ?? []) as ServerWithNode[])
     setLoading(false)
@@ -90,8 +91,9 @@ export default function Servers() {
                   <Link to={`/servers/${server.id}`} className="relative w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-400/20 to-cyan-400/10 border border-emerald-400/20 flex items-center justify-center shrink-0 hover:border-emerald-400/40 transition-colors"><Gamepad2 className="w-5 h-5 text-emerald-300" /></Link>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-3 mb-1"><Link to={`/servers/${server.id}`} className="text-slate-50 hover:text-emerald-300 font-black text-base truncate inline-flex items-center gap-1.5 transition-colors">{server.name}<ExternalLink className="w-3 h-3 text-slate-600" /></Link><span className={cn('inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold border capitalize', statusClass[server.status] ?? statusClass.stopped)}>{server.status}</span></div>
-                    <div className="grid grid-cols-2 lg:grid-cols-5 gap-x-6 gap-y-1.5 mt-3">
+                    <div className="grid grid-cols-2 lg:grid-cols-6 gap-x-6 gap-y-1.5 mt-3">
                       <Info label="Game" value={game.label} />
+                      <Info label="Connect" value={getServerConnection(server)} mono />
                       <Info label="Node" value={server.nodes?.name ?? 'Unknown'} />
                       <Info label="Node status" value={server.nodes?.status ?? 'unknown'} />
                       <Info label="Created" value={timeAgo(server.created_at)} />
