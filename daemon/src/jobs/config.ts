@@ -28,7 +28,7 @@ function safeInstallPath(value: string) {
 }
 
 function text(value: unknown, fallback: string) {
-  if (typeof value === 'string' && value.trim()) return value.trim()
+  if (typeof value === 'string') return value.trim()
   return fallback
 }
 
@@ -97,7 +97,32 @@ function build7dtdConfig(settings: Record<string, unknown>) {
   ].join('\n')
 }
 
-function buildDayzConfig(settings: Record<string, unknown>) {
+function cfgString(value: string) {
+  return `"${escapeCfg(value)}"`
+}
+
+function upsertCfgScalar(config: string, key: string, value: string) {
+  const line = `${key} = ${value};`
+  const pattern = new RegExp(`(^|\\n)\\s*${key}\\s*=\\s*[^;\\n]*;`, 'i')
+  if (pattern.test(config)) return config.replace(pattern, match => `${match.startsWith('\n') ? '\n' : ''}${line}`)
+  const insertBefore = config.search(/\n\s*class\s+Missions\b/i)
+  if (insertBefore >= 0) return `${config.slice(0, insertBefore).trimEnd()}\n${line}\n${config.slice(insertBefore)}`
+  return `${config.trimEnd()}\n${line}\n`
+}
+
+function upsertDayzMission(config: string, mission: string) {
+  const escaped = cfgString(mission)
+  if (/template\s*=\s*"[^"]*"\s*;/i.test(config)) return config.replace(/template\s*=\s*"[^"]*"\s*;/i, `template = ${escaped};`)
+  return `${config.trimEnd()}\n\nclass Missions {\n  class DayZ {\n    template = ${escaped};\n  };\n};\n`
+}
+
+async function buildDayzConfig(configPath: string, settings: Record<string, unknown>) {
+  let config = ''
+  try { config = await fs.readFile(configPath, 'utf8') } catch { config = '' }
+  if (!config.trim()) {
+    config = 'class Missions {\n  class DayZ {\n    template = "dayzOffline.chernarusplus";\n  };\n};\n'
+  }
+
   const hostname = text(settings.serverName, 'ApexGSP DayZ Server')
   const serverPassword = text(settings.serverPassword, '')
   const adminPassword = text(settings.adminPassword, 'changeme')
@@ -111,33 +136,27 @@ function buildDayzConfig(settings: Record<string, unknown>) {
   const timeAcceleration = intText(settings.timeAcceleration, 1, 1, 64)
   const nightAcceleration = intText(settings.nightAcceleration, 1, 1, 64)
 
-  return [
-    `hostname = "${escapeCfg(hostname)}";`,
-    `password = "${escapeCfg(serverPassword)}";`,
-    `passwordAdmin = "${escapeCfg(adminPassword)}";`,
-    `maxPlayers = ${maxPlayers};`,
-    `serverPort = ${port};`,
-    'verifySignatures = 2;',
-    'forceSameBuild = 1;',
-    `disableVoN = ${von === '1' ? '0' : '1'};`,
-    'vonCodecQuality = 20;',
-    `disable3rdPerson = ${thirdPerson === '1' ? '0' : '1'};`,
-    `disableCrosshair = ${crosshair === '1' ? '0' : '1'};`,
-    'serverTime = "SystemTime";',
-    `serverTimeAcceleration = ${timeAcceleration};`,
-    `serverNightTimeAcceleration = ${nightAcceleration};`,
-    'guaranteedUpdates = 1;',
-    'loginQueueConcurrentPlayers = 5;',
-    'loginQueueMaxPlayers = 500;',
-    `instanceId = ${instanceId};`,
-    'storageAutoFix = 1;',
-    'class Missions {',
-    '  class DayZ {',
-    `    template = "${escapeCfg(mission)}";`,
-    '  };',
-    '};',
-    '',
-  ].join('\n')
+  config = upsertCfgScalar(config, 'hostname', cfgString(hostname))
+  config = upsertCfgScalar(config, 'password', cfgString(serverPassword))
+  config = upsertCfgScalar(config, 'passwordAdmin', cfgString(adminPassword))
+  config = upsertCfgScalar(config, 'maxPlayers', maxPlayers)
+  config = upsertCfgScalar(config, 'serverPort', port)
+  config = upsertCfgScalar(config, 'verifySignatures', '2')
+  config = upsertCfgScalar(config, 'forceSameBuild', '1')
+  config = upsertCfgScalar(config, 'disableVoN', von === '1' ? '0' : '1')
+  config = upsertCfgScalar(config, 'vonCodecQuality', '20')
+  config = upsertCfgScalar(config, 'disable3rdPerson', thirdPerson === '1' ? '0' : '1')
+  config = upsertCfgScalar(config, 'disableCrosshair', crosshair === '1' ? '0' : '1')
+  config = upsertCfgScalar(config, 'serverTime', cfgString('SystemTime'))
+  config = upsertCfgScalar(config, 'serverTimeAcceleration', timeAcceleration)
+  config = upsertCfgScalar(config, 'serverNightTimeAcceleration', nightAcceleration)
+  config = upsertCfgScalar(config, 'guaranteedUpdates', '1')
+  config = upsertCfgScalar(config, 'loginQueueConcurrentPlayers', '5')
+  config = upsertCfgScalar(config, 'loginQueueMaxPlayers', '500')
+  config = upsertCfgScalar(config, 'instanceId', instanceId)
+  config = upsertCfgScalar(config, 'storageAutoFix', '1')
+  config = upsertDayzMission(config, mission)
+  return `${config.trimEnd()}\n`
 }
 
 export async function updateServerConfig(payload: unknown, ctx?: JobContext) {
@@ -148,7 +167,7 @@ export async function updateServerConfig(payload: unknown, ctx?: JobContext) {
 
   await ctx?.reportProgress({ progress: 25, message: 'Building server configuration', serverId: input.serverId, game: input.game })
 
-  const config = isDayz ? buildDayzConfig(input.settings) : build7dtdConfig(input.settings)
+  const config = isDayz ? await buildDayzConfig(configPath, input.settings) : build7dtdConfig(input.settings)
   await fs.writeFile(configPath, config, 'utf8')
 
   await ctx?.reportProgress({ progress: 100, message: 'Server configuration saved', serverId: input.serverId, configPath })
