@@ -1,18 +1,12 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import type { DaemonConfig } from './config.js'
-import { reportServerStatuses } from './client.js'
 import { runCommand } from './utils/exec.js'
 
-type ServerStatusReport = {
+export type ServerStatusReport = {
   installPath: string
   game: string
   status: 'running' | 'stopped'
   pid: number | null
-}
-
-function sleep(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 async function exists(filePath: string) {
@@ -33,7 +27,7 @@ async function findPid(installPath: string, game: string) {
   return Number.isFinite(pid) && pid > 0 ? pid : null
 }
 
-async function scanServers(root: string): Promise<ServerStatusReport[]> {
+export async function collectServerStatuses(root = process.env.APEXGSP_SERVERS_ROOT || '/opt/apexgsp/servers'): Promise<ServerStatusReport[]> {
   const resolvedRoot = path.resolve(root)
   const entries = await fs.readdir(resolvedRoot, { withFileTypes: true }).catch(() => [])
   const reports: ServerStatusReport[] = []
@@ -48,20 +42,4 @@ async function scanServers(root: string): Promise<ServerStatusReport[]> {
   }
 
   return reports
-}
-
-export async function serverStatusSyncLoop(config: DaemonConfig, log: (message: string) => void) {
-  const root = process.env.APEXGSP_SERVERS_ROOT || '/opt/apexgsp/servers'
-  const intervalMs = Number(process.env.APEXGSP_STATUS_SYNC_INTERVAL_MS || 15000)
-
-  while (true) {
-    try {
-      const servers = await scanServers(root)
-      if (servers.length > 0) await reportServerStatuses(config, servers)
-    } catch (error) {
-      log(`Server status sync failed: ${(error as Error).message}`)
-    }
-
-    await sleep(intervalMs)
-  }
 }
